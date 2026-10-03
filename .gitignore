@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+venv/
+.venv/
+.env
+.vscode/
+
+# Local data — never committed
+backend/content/
+backend/chroma_db/
+backend/document_cache/
+*.log
