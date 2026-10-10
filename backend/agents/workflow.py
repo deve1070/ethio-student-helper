@@ -112,6 +112,10 @@ class AgentWorkflow:
                 "draft_answer": final_state.get("draft_answer"),
                 "citations": final_state.get("citations", []),
                 "verification_report": final_state.get("verification_report"),
+                # False = the textbook has nothing on this question (the "not related" reply);
+                # verification_status: "PASS" | "FAIL" | "ERROR" | "" (not run)
+                "is_relevant": bool(final_state.get("is_relevant")),
+                "verification_status": final_state.get("verification_status", ""),
             }
         except Exception as e:
             logger.error(f"Workflow execution failed: {e}")

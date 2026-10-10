@@ -31,7 +31,6 @@ Usage (api/routes_explain.py):
     ...
     retriever = DecomposingRetriever(retriever, _planner_llm)
 """
-
 import json
 import logging
 import re
@@ -54,9 +53,9 @@ _PLANNER_PROMPT = (
     "queries.\n"
     "Rules:\n"
     "- Give 2 to 6 queries. Each is SHORT (2 to 6 words), for example "
-    '"electron affinity trend".\n'
+    "\"electron affinity trend\".\n"
     "- Take the topics from the passages when they list them. A sentence such as "
-    '"Major trends are X, Y and Z" gives one query for each of X, Y and Z.\n'
+    "\"Major trends are X, Y and Z\" gives one query for each of X, Y and Z.\n"
     "- For a comparison of A and B, give one query for A and one for B.\n"
     "- Give a single query only if the question and passages really name just "
     "one topic.\n"
@@ -67,16 +66,8 @@ _PLANNER_PROMPT = (
 
 
 class DecomposingRetriever:
-    def __init__(
-        self,
-        base,
-        llm=None,
-        per_query: int = 5,
-        original_k: int = 6,
-        max_docs: int = 14,
-        passages_for_planner: int = 4,
-        passage_chars: int = 350,
-    ):
+    def __init__(self, base, llm=None, per_query: int = 5, original_k: int = 6,
+                 max_docs: int = 14, passages_for_planner: int = 4, passage_chars: int = 350):
         self.base = base
         self.llm = llm
         self.per_query = per_query
@@ -99,24 +90,15 @@ class DecomposingRetriever:
         """Return the search queries (fewer than 2 means: do not split)."""
         if self.llm is None or not self.looks_broad(question):
             return []
-        passages = (
-            "\n".join(
-                f"- {' '.join(d.page_content.split())[: self.passage_chars]}"
-                for d in (docs or [])[: self.passages_for_planner]
-            )
-            or "(none)"
-        )
+        passages = "\n".join(
+            f"- {' '.join(d.page_content.split())[: self.passage_chars]}"
+            for d in (docs or [])[: self.passages_for_planner]
+        ) or "(none)"
         raw = ""
         try:
             response = self.llm.chat(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": _PLANNER_PROMPT.format(
-                            question=question, passages=passages
-                        ),
-                    }
-                ]
+                messages=[{"role": "user", "content": _PLANNER_PROMPT.format(
+                    question=question, passages=passages)}]
             )
             raw = (response["choices"][0]["message"]["content"] or "").strip()
             start, end = raw.find("["), raw.rfind("]")
@@ -131,9 +113,7 @@ class DecomposingRetriever:
 
     @staticmethod
     def _key(doc) -> str:
-        return (getattr(doc, "metadata", None) or {}).get(
-            "vector_id"
-        ) or doc.page_content
+        return (getattr(doc, "metadata", None) or {}).get("vector_id") or doc.page_content
 
     # -- retriever interface used by the workflow -------------------------
     def invoke(self, question: str, *args, **kwargs):

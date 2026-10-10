@@ -7,19 +7,17 @@ this same endpoint. Exam-solve mode (with the answer cache) and payments
 build on top of this once it's working end to end.
 """
 
-import difflib
-
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-
 from agents.workflow import AgentWorkflow
 from config import constants
 from db.models import Textbook
 from db.session import SessionLocal
+from fastapi import APIRouter, HTTPException
 from llm.client import LLMClient
 from llm.retry import LLMUnavailableError
+from pydantic import BaseModel, Field
 from retriever.builder import RetrieverBuilder
 from retriever.decompose import DecomposingRetriever
+from utils.subjects import resolve_subject
 
 router = APIRouter(prefix="/v1", tags=["explain"])
 
@@ -30,14 +28,6 @@ _workflow = AgentWorkflow()
 # Splits broad questions ("what are the trends in...") into separate searches.
 _planner_llm = LLMClient(temperature=0, max_tokens=600)
 
-_ALIASES = {
-    "maths": "mathematics",
-    "math": "mathematics",
-    "bio": "biology",
-    "chem": "chemistry",
-    "geo": "geography",
-}
-
 
 def _available_subjects(grade: int) -> list[str]:
     db = SessionLocal()
@@ -47,15 +37,6 @@ def _available_subjects(grade: int) -> list[str]:
         )
     finally:
         db.close()
-
-
-def _resolve_subject(raw: str, available: list[str]):
-    """Returns (subject_to_use, suggestion); subject_to_use is None if unknown."""
-    subject = _ALIASES.get(raw.strip().lower(), raw.strip().lower())
-    if subject in available:
-        return subject, None
-    close = difflib.get_close_matches(subject, available, n=1, cutoff=0.6)
-    return None, (close[0] if close else None)
 
 
 class ExplainRequest(BaseModel):
@@ -84,7 +65,7 @@ def explain(request: ExplainRequest) -> ExplainResponse:
         )
 
     available = _available_subjects(request.grade)
-    subject, suggestion = _resolve_subject(request.subject, available)
+    subject, suggestion = resolve_subject(request.subject, available)
     if subject is None:
         hint = f" Did you mean '{suggestion}'?" if suggestion else ""
         raise HTTPException(
