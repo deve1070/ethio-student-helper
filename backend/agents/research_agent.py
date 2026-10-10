@@ -3,6 +3,7 @@ from langchain.schema import Document
 from llm.client import LLMClient
 from llm.retry import LLMUnavailableError
 
+
 # Plain (non-f-string) text so backslashes and braces need no escaping.
 # The client renders $...$ / $$...$$ with KaTeX (remark-math + rehype-katex on
 # the web). \( \) delimiters are avoided because Markdown treats "\(" as an
@@ -83,9 +84,7 @@ class ResearchAgent:
             print("LLM response received.")
         except Exception as e:
             print(f"Error during model inference: {e}")
-            raise LLMUnavailableError(
-                "Failed to generate answer due to a model error"
-            ) from e
+            raise LLMUnavailableError("Failed to generate answer due to a model error") from e
         try:
             llm_response = response["choices"][0]["message"]["content"].strip()
             print(f"Raw LLM response:\n{llm_response}")

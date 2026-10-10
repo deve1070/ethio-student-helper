@@ -2,6 +2,7 @@ import json
 import logging
 
 from langchain.schema import Document
+
 from llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,7 @@ def _as_bool(value) -> bool:
 
 
 def _as_list(value) -> list[str]:
-    if not value or (
-        isinstance(value, str) and value.strip().lower() in {"none", "n/a", ""}
-    ):
+    if not value or (isinstance(value, str) and value.strip().lower() in {"none", "n/a", ""}):
         return []
     if isinstance(value, str):
         return [value.strip()]

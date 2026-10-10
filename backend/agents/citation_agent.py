@@ -14,7 +14,6 @@ Both depend on ingestion/textbook_ingest.py having written a matching
 Chunk row (keyed by vector_id) for every vector in the textbook
 collection.
 """
-
 import re
 import uuid
 
