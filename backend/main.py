@@ -15,11 +15,13 @@ from api.routes_auth import router as auth_router
 from api.routes_exam import router as exam_router
 from api.routes_explain import router as explain_router
 from api.routes_payments import router as payments_router
+from api.routes_practice import router as practice_router
 
 app = FastAPI(title="Ethiopian Student Helper API", version="0.1.0")
 
 app.include_router(auth_router)
 app.include_router(explain_router)
+app.include_router(practice_router)
 # app.include_router(exam_router)
 # app.include_router(payments_router)
 
