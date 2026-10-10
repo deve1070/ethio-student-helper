@@ -11,3 +11,6 @@ backend/content/
 backend/chroma_db/
 backend/document_cache/
 *.log
+backend/.gradio/
+backend/units_report_*.txt
+backend/practice_progress.json
