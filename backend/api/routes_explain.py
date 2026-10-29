@@ -1,12 +1,3 @@
-"""
-POST /v1/explain — a grounded explanation of a textbook topic, scoped to
-a grade + subject, with structured citations back to the source chunk(s).
-
-This is the first vertical slice: web, Telegram bot, and mobile all call
-this same endpoint. Exam-solve mode (with the answer cache) and payments
-build on top of this once it's working end to end.
-"""
-
 from agents.workflow import AgentWorkflow
 from config import constants
 from db.models import Textbook

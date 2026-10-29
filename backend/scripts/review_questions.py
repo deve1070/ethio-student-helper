@@ -1,20 +1,3 @@
-"""
-Read, approve or reject the generated questions, one at a time, in the terminal.
-Only APPROVED questions are shown to students.
-
-    python scripts/review_questions.py --grade 9 --subject chemistry
-    python scripts/review_questions.py --grade 9 --subject chemistry --unit "Unit 4" --limit 30
-
-For each question you see the options, the marked answer, the explanation and the
-book sentence the question is based on. Keys:
-    a  approve (the question goes live)
-    r  reject  (kept in the database as 'retired', never shown)
-    k  the marked answer is WRONG: type the right letter; the question is fixed and approved
-    s  skip (stays in the review queue)
-    q  quit
-Check the answer against your textbook, not against your memory.
-"""
-
 import argparse
 import os
 import sys
@@ -29,7 +12,51 @@ LETTERS = (
 )  # a tuple: with a string, "" in "ABCD" is True and an empty answer would pick A
 
 
-def show(i: int, total: int, q, out=print) -> None:
+def select_questions(
+    db,
+    grade,
+    subject=None,
+    unit=None,
+    flagged_only=False,
+    limit=20,
+    min_answers=None,
+    max_accuracy=None,
+):
+    """Returns (questions to show, {question_id: [reasons]}, how many are waiting in total)."""
+    from db.models_practice import QuizQuestion
+    from practice import health
+
+    min_answers = health.MIN_ANSWERS if min_answers is None else min_answers
+    max_accuracy = health.MAX_ACCURACY if max_accuracy is None else max_accuracy
+    if flagged_only:
+        found = health.find_flagged(db, grade, subject, unit, min_answers, max_accuracy)
+        return [q for q, _ in found[:limit]], {q.id: r for q, r in found}, len(found)
+
+    q = db.query(QuizQuestion).filter(
+        QuizQuestion.grade == grade, QuizQuestion.status == "needs_review"
+    )
+    if subject:
+        q = q.filter(QuizQuestion.subject == subject)
+    if unit:
+        q = q.filter(QuizQuestion.unit_or_chapter.ilike(f"%{unit}%"))
+    waiting = q.count()
+    rows = (
+        q.order_by(
+            QuizQuestion.unit_or_chapter, QuizQuestion.page_start, QuizQuestion.question
+        )
+        .limit(limit)
+        .all()
+    )
+    info = health.report_info(db, [r.id for r in rows])
+    flags = {
+        r.id: health.flag_reasons("needs_review", 0, 0, *info[r.id][:1], info[r.id][1])
+        for r in rows
+        if r.id in info
+    }
+    return rows, flags, waiting
+
+
+def show(i: int, total: int, q, out=print, reasons=None) -> None:
     pages = (
         f"{q.page_start}"
         if q.page_end in (None, q.page_start)
@@ -38,6 +65,8 @@ def show(i: int, total: int, q, out=print) -> None:
     out(
         f"\n[{i}/{total}]  {q.unit_or_chapter}  |  printed page {pages}  |  {q.difficulty}"
     )
+    for r in reasons or []:
+        out(f"   !! {r}")
     out(f"Q: {q.question}")
     for letter, option in zip(LETTERS, q.options):
         out(
@@ -50,14 +79,33 @@ def show(i: int, total: int, q, out=print) -> None:
         )
     out(f"Why: {q.explanation}")
     out(f'Book: "{q.supporting_quote}"')
+    if q.times_answered:
+        out(
+            f"Students: answered {q.times_answered} times, {round(100 * q.times_correct / q.times_answered)}% correct"
+        )
 
 
-def review_loop(db, questions, ask=input, out=print) -> dict:
+def apply_key_fix(db, q, new_index: int) -> int:
+    """Set the correct option and re-score every earlier student answer against it (so their
+    accuracy and weak-unit lists stop being wrong). Returns how many answers were re-scored."""
+    from db.models_practice import QuizAttempt
+
+    attempts = db.query(QuizAttempt).filter(QuizAttempt.question_id == q.id).all()
+    for a in attempts:
+        a.is_correct = a.chosen_index == new_index
+    q.answer_index = new_index
+    q.times_answered = len(attempts)
+    q.times_correct = sum(1 for a in attempts if a.is_correct)
+    return len(attempts)
+
+
+def review_loop(db, questions, ask=input, out=print, flags=None) -> dict:
     """Interactive review; returns counts. `ask` and `out` can be replaced in tests."""
+    flags = flags or {}
     counts = {"approved": 0, "rejected": 0, "fixed": 0, "skipped": 0}
     total = len(questions)
     for i, q in enumerate(questions, start=1):
-        show(i, total, q, out)
+        show(i, total, q, out, flags.get(q.id))
         while True:
             choice = (
                 ask("(a)pprove  (r)eject  (k)ey is wrong  (s)kip  (q)uit > ")
@@ -66,6 +114,9 @@ def review_loop(db, questions, ask=input, out=print) -> dict:
             )
             if choice == "a":
                 q.status = "active"
+                q.times_answered = q.times_correct = (
+                    0  # a human checked it: statistics start again
+                )
                 counts["approved"] += 1
             elif choice == "r":
                 q.status = "retired"
@@ -82,9 +133,13 @@ def review_loop(db, questions, ask=input, out=print) -> dict:
                         out("Please type A, B, C or D.")
                 if letter == "X":
                     continue
-                q.answer_index = LETTERS.index(letter)
+                n = apply_key_fix(db, q, LETTERS.index(letter))
                 q.status = "active"
                 counts["fixed"] += 1
+                if n:
+                    out(
+                        f"   (re-scored {n} earlier student answer(s) against the corrected key)"
+                    )
             elif choice == "s":
                 counts["skipped"] += 1
             elif choice == "q":
@@ -104,6 +159,11 @@ def main() -> None:
     ap.add_argument("--subject", required=True)
     ap.add_argument("--unit", default=None)
     ap.add_argument("--limit", type=int, default=20)
+    ap.add_argument(
+        "--flagged", action="store_true", help="only reported or low-accuracy questions"
+    )
+    ap.add_argument("--min-answers", type=int, default=None)
+    ap.add_argument("--max-accuracy", type=float, default=None)
     args = ap.parse_args()
 
     from db.models_practice import QuizQuestion
@@ -126,25 +186,21 @@ def main() -> None:
             + (f"Did you mean '{suggestion}'? " if suggestion else "")
             + f"Available: {', '.join(available) or 'none'}"
         )
-    q = db.query(QuizQuestion).filter(
-        QuizQuestion.grade == args.grade,
-        QuizQuestion.subject == subject,
-        QuizQuestion.status == "needs_review",
+    rows, flags, waiting = select_questions(
+        db,
+        args.grade,
+        subject,
+        args.unit,
+        args.flagged,
+        args.limit,
+        args.min_answers,
+        args.max_accuracy,
     )
-    if args.unit:
-        q = q.filter(QuizQuestion.unit_or_chapter.ilike(f"%{args.unit}%"))
-    waiting = q.count()
-    rows = (
-        q.order_by(
-            QuizQuestion.unit_or_chapter, QuizQuestion.page_start, QuizQuestion.question
-        )
-        .limit(args.limit)
-        .all()
-    )
-    print(f"{waiting} question(s) waiting for review; showing {len(rows)}.")
+    what = "flagged" if args.flagged else "waiting for review"
+    print(f"{waiting} question(s) {what}; showing {len(rows)}.")
     if not rows:
         return
-    counts = review_loop(db, rows)
+    counts = review_loop(db, rows, flags=flags)
     print(
         f"\nDone: {counts['approved']} approved, {counts['fixed']} fixed and approved, "
         f"{counts['rejected']} rejected, {counts['skipped']} skipped."

@@ -1,19 +1,5 @@
-"""
-Practice mode: multiple-choice questions served from the question bank.
 
-  GET  /v1/practice/units?grade=&subject=      units with question counts and my progress
-  POST /v1/practice/next                       the next questions to practise (no answers included)
-  POST /v1/practice/answer                     check an answer, get the explanation and the book page
-  GET  /v1/practice/progress?grade=&subject=   my accuracy per unit and my weakest units
 
-Questions are generated and verified in advance (scripts/generate_questions.py),
-so these routes make NO model calls: they are fast and cost no credits. If you
-later want to limit free use, add require_credits(...) where marked below.
-
-The user always comes from the bearer token (get_current_user), never from the body.
-"""
-
-import re
 import uuid
 from typing import Literal
 
@@ -22,11 +8,13 @@ from db.models import Textbook, User
 from db.models_practice import QuizAttempt, QuizQuestion, QuizReport
 from db.session import get_db
 from fastapi import APIRouter, Depends, HTTPException
-from practice.selection import pick_questions, unit_progress
+from practice.progress import attempt_rows, attempt_timestamps
+from practice.selection import daily_trend, pick_questions, unit_progress
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from utils.subjects import resolve_subject
+from utils.units import unit_sort_key
 
 router = APIRouter(prefix="/v1/practice", tags=["practice"])
 
@@ -80,16 +68,21 @@ class AnswerResponse(BaseModel):
     citation: AnswerCitation
 
 
+class MistakeItem(BaseModel):
+    question_id: uuid.UUID
+    question: str
+    options: list[str]
+    chosen_index: int
+    correct_index: int
+    explanation: str
+    unit: str | None
+
+
 # ---- helpers --------------------------------------------------------------
 def _format_page(start: int | None, end: int | None) -> str | None:
     if start is None:
         return None
     return str(start) if end is None or end == start else f"{start}-{end}"
-
-
-def _unit_sort_key(unit: str | None):
-    m = re.search(r"\d+", unit or "")
-    return (int(m.group()) if m else 10_000, unit or "")
 
 
 def _resolve_subject_or_400(db: Session, grade: int, raw: str) -> str:
@@ -112,25 +105,6 @@ def _resolve_subject_or_400(db: Session, grade: int, raw: str) -> str:
             ),
         )
     return subject
-
-
-def _attempt_rows(db: Session, user_id, grade: int, subject: str):
-    """[(unit, attempts, correct)] for one user, grade and subject."""
-    correct = func.coalesce(
-        func.sum(case((QuizAttempt.is_correct.is_(True), 1), else_=0)), 0
-    )
-    rows = (
-        db.query(QuizQuestion.unit_or_chapter, func.count(QuizAttempt.id), correct)
-        .join(QuizAttempt, QuizAttempt.question_id == QuizQuestion.id)
-        .filter(
-            QuizAttempt.user_id == user_id,
-            QuizQuestion.grade == grade,
-            QuizQuestion.subject == subject,
-        )
-        .group_by(QuizQuestion.unit_or_chapter)
-        .all()
-    )
-    return [(u or "(no unit)", int(a), int(c)) for u, a, c in rows]
 
 
 class ReportRequest(BaseModel):
@@ -195,7 +169,7 @@ def units(
         .all()
     )
     mine = {
-        r["unit"]: r for r in unit_progress(_attempt_rows(db, user.id, grade, subject))
+        r["unit"]: r for r in unit_progress(attempt_rows(db, user.id, grade, subject))
     }
     out = []
     for unit, n in counts:
@@ -210,7 +184,7 @@ def units(
                 "level": p["level"] if p else "not enough data",
             }
         )
-    out.sort(key=lambda r: _unit_sort_key(r["unit"]))
+    out.sort(key=lambda r: unit_sort_key(r["unit"]))
     return {"grade": grade, "subject": subject, "units": out}
 
 
@@ -305,6 +279,52 @@ def answer(
     )
 
 
+@router.get("/mistakes", response_model=list[MistakeItem])
+def mistakes(
+    grade: int,
+    subject: str,
+    count: int = 20,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[MistakeItem]:
+    """This student's most recently wrong answers (latest attempt per question only - a question they
+    got wrong then later got right no longer counts as a live mistake), newest first."""
+    subject = _resolve_subject_or_400(db, grade, subject)
+    rows = (
+        db.query(
+            QuizAttempt.question_id, QuizAttempt.is_correct, QuizAttempt.chosen_index, QuizAttempt.created_at
+        )
+        .join(QuizQuestion, QuizAttempt.question_id == QuizQuestion.id)
+        .filter(QuizAttempt.user_id == user.id, QuizQuestion.grade == grade, QuizQuestion.subject == subject)
+        .order_by(QuizAttempt.created_at)
+        .all()
+    )
+    latest: dict[uuid.UUID, tuple[bool, int, object]] = {}
+    for qid, ok, idx, ts in rows:
+        latest[qid] = (ok, idx, ts)  # ordered by time, so the latest attempt wins
+    wrong_ids = sorted(
+        (qid for qid, (ok, _idx, _ts) in latest.items() if not ok),
+        key=lambda qid: latest[qid][2],
+        reverse=True,
+    )[: min(count, 50)]
+    if not wrong_ids:
+        return []
+    questions = {q.id: q for q in db.query(QuizQuestion).filter(QuizQuestion.id.in_(wrong_ids)).all()}
+    return [
+        MistakeItem(
+            question_id=qid,
+            question=questions[qid].question,
+            options=list(questions[qid].options),
+            chosen_index=latest[qid][1],
+            correct_index=questions[qid].answer_index,
+            explanation=questions[qid].explanation,
+            unit=questions[qid].unit_or_chapter,
+        )
+        for qid in wrong_ids
+        if qid in questions
+    ]
+
+
 @router.get("/progress")
 def progress(
     grade: int,
@@ -313,7 +333,7 @@ def progress(
     user: User = Depends(get_current_user),
 ) -> dict:
     subject = _resolve_subject_or_400(db, grade, subject)
-    rows = _attempt_rows(db, user.id, grade, subject)
+    rows = attempt_rows(db, user.id, grade, subject)
     units_summary = unit_progress(rows)
     attempts = sum(r[1] for r in rows)
     correct = sum(r[2] for r in rows)
@@ -324,4 +344,5 @@ def progress(
         "accuracy": round(correct / attempts, 2) if attempts else None,
         "weakest_units": [u["unit"] for u in units_summary if u["level"] == "weak"][:3],
         "units": units_summary,
+        "trend": daily_trend(attempt_timestamps(db, user.id, grade, subject)),
     }
