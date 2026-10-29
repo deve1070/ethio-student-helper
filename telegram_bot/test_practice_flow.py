@@ -1,8 +1,3 @@
-"""Tests for /practice and /progress with a fake backend (no Telegram, no network).
-Run from the project root (the folder that contains backend/ and telegram_bot/):
-    python telegram_bot/test_practice_flow.py
-"""
-
 import asyncio
 import os
 import sys
@@ -10,11 +5,16 @@ import types
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import tempfile
+
 os.environ.setdefault(
     "TELEGRAM_BOT_TOKEN", "test-token"
 )  # config.py insists on one at import time
+os.environ["BOT_DATA_DIR"] = (
+    tempfile.mkdtemp()
+)  # never write the bot's real saved state during tests
 
-from telegram_bot.practice_flow import (
+from telegram_bot.practice_flow import (  # noqa: E402
     FlowError,
     PracticeSession,
     clip,

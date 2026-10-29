@@ -54,7 +54,13 @@ async def exam_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def exam_photo_handler(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """A photo sent with caption "/exam <grade> <subject>"."""
+    """A photo sent with caption "/exam <grade> <subject>". Silently does nothing on any other
+    caption (e.g. "/submit_receipt ..."), so it never interferes with payment_handler's own
+    receipt_photo_handler registered on the same update."""
+    caption = update.message.caption or ""
+    if not caption.startswith("/exam"):
+        return
+
     telegram_user_id = update.effective_user.id
     if not api_client.is_logged_in(telegram_user_id):
         await update.message.reply_text(
@@ -62,7 +68,7 @@ async def exam_photo_handler(
         )
         return
 
-    caption_args = (update.message.caption or "").replace("/exam", "").split()
+    caption_args = caption.replace("/exam", "").split()
     if len(caption_args) < 2:
         await update.message.reply_text(
             "Send the photo with a caption like: /exam 12 Physics"

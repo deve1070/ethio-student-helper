@@ -1,18 +1,8 @@
-"""
-/login <identifier> <password> — links this Telegram account to an
-existing account (students sign up on the web app first; this just
-connects the bot to that same account).
-
-The bot attempts to delete the incoming message afterward so the
-password doesn't sit in the visible chat history. This only works in
-private chats and isn't guaranteed by the Telegram API — treat it as
-chat hygiene, not a real security boundary.
-"""
-
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from telegram_bot import api_client
+from telegram_bot import api_client, reminders
+from telegram_bot import store as bot_store
 from telegram_bot.api_client import BackendError
 
 
@@ -43,6 +33,18 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(
         "Logged in! Try:\n"
         "/practice  (multiple-choice questions)\n"
+        "/remind 18:00  (a daily practice reminder)\n"
         "/explain 11 Biology What is mitosis?\n"
         "/exam 12 Physics <question>"
+    )
+
+
+async def logout_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Forget the saved login and the daily reminder (useful on a shared phone)."""
+    uid = update.effective_user.id
+    api_client.logout(uid)
+    bot_store.get_store().drop_reminder(uid)
+    reminders.cancel_reminder(context.application.job_queue, uid)
+    await update.message.reply_text(
+        "Logged out. Your reminder is off too. Use /login to come back."
     )

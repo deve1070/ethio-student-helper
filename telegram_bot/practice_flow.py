@@ -1,12 +1,3 @@
-"""
-The /practice and /progress conversation as plain Python: no Telegram classes, no network.
-Every method takes a button press (or nothing) and returns a Screen (text + button rows), which
-handlers/practice_handler.py turns into a Telegram message. Keeping the logic here makes it testable.
-
-State lives in one PracticeSession per student (kept in the bot's per-user memory). If the bot
-restarts, old buttons stop working and the student just sends /practice again.
-"""
-
 from dataclasses import dataclass, field
 
 LETTERS = ("A", "B", "C", "D")
@@ -21,6 +12,9 @@ class FlowError(Exception):
 class Screen:
     text: str
     buttons: list = field(default_factory=list)  # rows of (label, callback_data)
+    image_base64: str | None = None  # set by esslce_flow for a rendered LaTeX explanation; sent as a photo
+    image_caption: str | None = None  # self-contained verdict+options, sent as that photo's caption -
+    # not reliant on staying next to `text`'s separate message if a slow upload lands out of order
 
 
 def pretty_subject(subject: str) -> str:
@@ -56,6 +50,32 @@ class PracticeSession:
             else "Progress: which grade?"
         )
         return Screen(title, [[(f"Grade {g}", f"pg|{g}") for g in (9, 10, 11, 12)]])
+
+    def quick_start(self, grade: int, subject: str) -> Screen:
+        """Start straight away on a subject the student practised before (the reminder's button):
+        their weak units if they have any, otherwise questions from every unit."""
+        self.mode, self.grade, self.subject = "practice", grade, subject
+        self.subjects = [
+            {"subject": subject, "questions": 0}
+        ]  # so the Back buttons still work
+        self.units = self.api.practice_units(self.user_id, grade, subject)["units"]
+        weak = [u["unit"] for u in self.units if u["level"] == "weak"]
+        self.unit_filter = weak or None
+        self.queue, self.current = [], None
+        self._refill()
+        if not self.queue:
+            return Screen(
+                "There are no new questions in that subject right now. Choose another one:",
+                [[("Choose a subject", "pm")]],
+            )
+        screen = self._question_screen()
+        intro = (
+            "Starting with your weakest units."
+            if weak
+            else "A mix of questions from every unit."
+        )
+        screen.text = f"{intro}\n\n{screen.text}"
+        return screen
 
     def handle(self, data: str):
         """Dispatch one button press. Returns a Screen, or None to ignore (e.g. a double tap)."""

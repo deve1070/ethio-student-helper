@@ -1,18 +1,11 @@
-"""
-/practice  — choose grade, subject and unit, then answer multiple-choice questions with buttons
-/progress  — see your accuracy per unit and your weakest units
-
-The conversation itself is in telegram_bot/practice_flow.py; this file only connects it to Telegram.
-Backend calls run in a worker thread so one student's slow request never freezes the bot for everyone.
-"""
-
 import asyncio
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from telegram_bot import api_client
+from telegram_bot import api_client, reminders
+from telegram_bot import store as bot_store
 from telegram_bot.api_client import BackendError
 from telegram_bot.practice_flow import FlowError, PracticeSession
 
@@ -60,9 +53,44 @@ async def progress_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await _start(update, context, "progress")
 
 
+async def _quick_start(query, context) -> None:
+    """The Start button of the daily reminder: no menus, straight to questions."""
+    user_id = query.from_user.id
+    if not api_client.is_logged_in(user_id):
+        await query.answer(
+            "Please /login first, then tap Start again.", show_alert=True
+        )
+        return
+    session = PracticeSession(api_client, user_id, "practice")
+    context.user_data[SESSION_KEY] = session
+    pref = bot_store.get_store().get_pref(user_id)
+    try:
+        screen = (
+            await asyncio.to_thread(session.quick_start, pref["grade"], pref["subject"])
+            if pref
+            else session.start()
+        )
+    except BackendError as e:
+        await query.answer(friendly_practice_error(e), show_alert=True)
+        return
+    await query.answer()
+    await _show(query, screen)
+
+
+async def _show(query, screen) -> None:
+    try:
+        await query.edit_message_text(text=screen.text, reply_markup=keyboard(screen))
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            raise
+
+
 async def practice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Every button of the practice and progress menus."""
     query = update.callback_query
+    if query.data == "pd":
+        await _quick_start(query, context)
+        return
     session = context.user_data.get(SESSION_KEY)
     if session is None or not api_client.is_logged_in(query.from_user.id):
         await query.answer(
@@ -80,8 +108,13 @@ async def practice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     if screen is None:  # e.g. the student tapped the same answer twice
         return
-    try:
-        await query.edit_message_text(text=screen.text, reply_markup=keyboard(screen))
-    except BadRequest as e:
-        if "not modified" not in str(e).lower():
-            raise
+    st, user_id = bot_store.get_store(), query.from_user.id
+    if session.grade and session.subject:
+        st.set_pref(
+            user_id, session.grade, session.subject
+        )  # what the reminder will offer next time
+    if query.data.startswith("pa|"):
+        st.mark_active(
+            user_id, reminders.local_today()
+        )  # they practised today: no reminder
+    await _show(query, screen)

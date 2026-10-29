@@ -1,19 +1,11 @@
-"""
-Thin HTTP client the bot uses to call the backend API. Every function
-here maps to one endpoint from docs/data-model-api.md; the bot never
-touches the database, vector store, or payment gateway directly — the
-same backend that serves the web app and mobile app serves this too.
-"""
-
 import httpx
 
+from telegram_bot import store as _store
 from telegram_bot.config import BACKEND_BASE_URL
 
-# In-memory session store: telegram_user_id -> bearer token. Fine for a
-# single-process bot during development; replace with something
-# persistent (Redis, a small table) before running more than one worker,
-# or before a restart should keep students logged in.
-_sessions: dict[int, str] = {}
+# Login tokens are kept by telegram_bot/store.py (a file), so a bot restart does not log students out.
+# A token that the backend rejects (401) is forgotten at once, so the next command asks for /login.
+# Run ONE bot process: the file is not safe to share between several.
 
 
 class BackendError(Exception):
@@ -24,13 +16,17 @@ class BackendError(Exception):
 
 
 def _headers(telegram_user_id: int) -> dict:
-    token = _sessions.get(telegram_user_id)
+    token = _store.get_store().get_token(telegram_user_id)
     if not token:
         raise BackendError(401, "Not logged in")
     return {"Authorization": f"Bearer {token}"}
 
 
-def _raise_for_status(response: httpx.Response) -> None:
+def _raise_for_status(
+    response: httpx.Response, telegram_user_id: int | None = None
+) -> None:
+    if response.status_code == 401 and telegram_user_id is not None:
+        _store.get_store().drop_token(telegram_user_id)
     if response.status_code >= 400:
         try:
             detail = response.json().get("detail")
@@ -40,7 +36,11 @@ def _raise_for_status(response: httpx.Response) -> None:
 
 
 def is_logged_in(telegram_user_id: int) -> bool:
-    return telegram_user_id in _sessions
+    return _store.get_store().get_token(telegram_user_id) is not None
+
+
+def logout(telegram_user_id: int) -> None:
+    _store.get_store().drop_token(telegram_user_id)
 
 
 def link_account(telegram_user_id: int, identifier: str, password: str) -> None:
@@ -54,7 +54,7 @@ def link_account(telegram_user_id: int, identifier: str, password: str) -> None:
         timeout=15,
     )
     _raise_for_status(response)
-    _sessions[telegram_user_id] = response.json()["access_token"]
+    _store.get_store().set_token(telegram_user_id, response.json()["access_token"])
 
 
 def explain(telegram_user_id: int, grade: int, subject: str, question: str) -> dict:
@@ -64,7 +64,7 @@ def explain(telegram_user_id: int, grade: int, subject: str, question: str) -> d
         headers=_headers(telegram_user_id),
         timeout=60,
     )
-    _raise_for_status(response)
+    _raise_for_status(response, telegram_user_id)
     return response.json()
 
 
@@ -88,7 +88,7 @@ def exam_solve(
         headers=_headers(telegram_user_id),
         timeout=90,  # OCR + a possible LLM call can be slow
     )
-    _raise_for_status(response)
+    _raise_for_status(response, telegram_user_id)
     return response.json()
 
 
@@ -98,18 +98,51 @@ def get_credits(telegram_user_id: int) -> dict:
         headers=_headers(telegram_user_id),
         timeout=15,
     )
-    _raise_for_status(response)
+    _raise_for_status(response, telegram_user_id)
     return response.json()
 
 
-def checkout(telegram_user_id: int, bundle: str) -> dict:
+def submit_receipt(
+    telegram_user_id: int, bundle: str, transaction_id: str, photo_bytes: bytes
+) -> dict:
     response = httpx.post(
-        f"{BACKEND_BASE_URL}/v1/payments/checkout",
-        json={"bundle": bundle},
+        f"{BACKEND_BASE_URL}/v1/payments/submit-receipt",
+        data={"bundle": bundle, "transaction_id": transaction_id},
+        files={"receipt": ("receipt.jpg", photo_bytes, "image/jpeg")},
+        headers=_headers(telegram_user_id),
+        timeout=30,  # the backend runs a vision call before replying
+    )
+    _raise_for_status(response, telegram_user_id)
+    return response.json()
+
+
+def list_pending_payments(telegram_user_id: int) -> list:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/payments/pending",
         headers=_headers(telegram_user_id),
         timeout=15,
     )
-    _raise_for_status(response)
+    _raise_for_status(response, telegram_user_id)
+    return response.json()
+
+
+def approve_payment(telegram_user_id: int, payment_id: str) -> dict:
+    response = httpx.post(
+        f"{BACKEND_BASE_URL}/v1/payments/{payment_id}/approve",
+        headers=_headers(telegram_user_id),
+        timeout=15,
+    )
+    _raise_for_status(response, telegram_user_id)
+    return response.json()
+
+
+def reject_payment(telegram_user_id: int, payment_id: str) -> dict:
+    response = httpx.post(
+        f"{BACKEND_BASE_URL}/v1/payments/{payment_id}/reject",
+        headers=_headers(telegram_user_id),
+        timeout=15,
+    )
+    _raise_for_status(response, telegram_user_id)
     return response.json()
 
 
@@ -121,7 +154,7 @@ def _get(telegram_user_id: int, path: str, params: dict, timeout: int = 20) -> d
         headers=_headers(telegram_user_id),
         timeout=timeout,
     )
-    _raise_for_status(response)
+    _raise_for_status(response, telegram_user_id)
     return response.json()
 
 
@@ -132,7 +165,7 @@ def _post(telegram_user_id: int, path: str, body: dict, timeout: int = 20) -> di
         headers=_headers(telegram_user_id),
         timeout=timeout,
     )
-    _raise_for_status(response)
+    _raise_for_status(response, telegram_user_id)
     return response.json()
 
 
@@ -180,4 +213,86 @@ def practice_report(
         telegram_user_id,
         "/v1/practice/report",
         {"question_id": question_id, "reason": reason},
+    )
+
+
+# ---- ESSLCE (Grade-12 national exam past papers) mode -------------------------------------------------------
+def esslce_subjects(telegram_user_id: int) -> dict:
+    return _get(telegram_user_id, "/v1/esslce/subjects", {})
+
+
+def esslce_papers(telegram_user_id: int, subject: str) -> dict:
+    return _get(telegram_user_id, "/v1/esslce/papers", {"subject": subject})
+
+
+def esslce_units(telegram_user_id: int, subject: str) -> dict:
+    return _get(telegram_user_id, "/v1/esslce/units", {"subject": subject})
+
+
+def esslce_skills(telegram_user_id: int, subject: str) -> dict:
+    return _get(telegram_user_id, "/v1/esslce/skills", {"subject": subject})
+
+
+def esslce_progress(telegram_user_id: int, subject: str) -> dict:
+    return _get(telegram_user_id, "/v1/esslce/progress", {"subject": subject})
+
+
+def esslce_diagnostic(telegram_user_id: int, subject: str, count: int = 15) -> dict:
+    return _post(
+        telegram_user_id, "/v1/esslce/diagnostic", {"subject": subject, "count": count}
+    )
+
+
+def esslce_next(
+    telegram_user_id: int,
+    subject: str,
+    paper_id: int | None = None,
+    unit: str | None = None,
+    grade: int | None = None,
+    skill: str | None = None,
+    incorrect_only: bool = False,
+    count: int = 5,
+) -> dict:
+    body = {"subject": subject, "count": count}
+    if paper_id is not None:
+        body["paper_id"] = paper_id
+    if unit is not None:
+        body["unit"] = unit
+        body["grade"] = grade
+    if skill is not None:
+        body["skill"] = skill
+    if incorrect_only:
+        body["incorrect_only"] = True
+    return _post(telegram_user_id, "/v1/esslce/next", body)
+
+
+def esslce_answer(
+    telegram_user_id: int, question_id: int, chosen_index: int, mode: str = "practice"
+) -> dict:
+    return _post(
+        telegram_user_id,
+        "/v1/esslce/answer",
+        {"question_id": question_id, "chosen_index": chosen_index, "mode": mode},
+    )
+
+
+def esslce_exam_summary(telegram_user_id: int, paper_id: int) -> dict:
+    return _post(telegram_user_id, "/v1/esslce/exam-summary", {"paper_id": paper_id})
+
+
+def esslce_elaborate(telegram_user_id: int, question_id: int) -> dict:
+    # a cache miss means a live LLM call (grounding retrieval, or a generated+verified example) - slower
+    # than every other esslce_* call, which only ever touch the database
+    return _post(
+        telegram_user_id, "/v1/esslce/elaborate", {"question_id": question_id}, timeout=60
+    )
+
+
+def esslce_ask(telegram_user_id: int, question_id: int, message: str, history: list) -> dict:
+    # NEVER cached server-side (unlike elaborate) - every call is a fresh LLM call
+    return _post(
+        telegram_user_id,
+        "/v1/esslce/ask",
+        {"question_id": question_id, "message": message, "history": history},
+        timeout=60,
     )
