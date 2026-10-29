@@ -1,8 +1,3 @@
-"""Tables for the practice (quiz) feature. Same Base as db/models.py, so the
-foreign keys to users and textbooks resolve. Create them with:
-    python scripts/create_practice_tables.py
-"""
-
 import uuid
 from datetime import datetime
 
