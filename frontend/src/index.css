@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand: a deliberate deep teal, not the generic indigo/purple "AI SaaS" default.
+     600 is the primary action color - checked for AA contrast on white. */
+  --color-brand-50: #eefbf6;
+  --color-brand-100: #d2f3e6;
+  --color-brand-200: #a6e6d0;
+  --color-brand-300: #71d3b6;
+  --color-brand-400: #3fb99a;
+  --color-brand-500: #209b7d;
+  --color-brand-600: #137a63;
+  --color-brand-700: #126253;
+  --color-brand-800: #124e43;
+  --color-brand-900: #0f3f37;
+  --color-brand-950: #08241f;
+
+  /* Secondary accent for progress/streaks/highlights - warm, distinct from brand teal so the
+     two never get confused as "the same color, slightly off". */
+  --color-accent-400: #f2a73b;
+  --color-accent-500: #e78a1c;
+  --color-accent-600: #c66e10;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  --shadow-card: 0 1px 2px rgba(15, 23, 20, 0.04), 0 1px 3px rgba(15, 23, 20, 0.06);
+  --shadow-raised: 0 2px 6px rgba(15, 23, 20, 0.08), 0 6px 20px rgba(15, 23, 20, 0.08);
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  background-color: #f7f8f7;
+}
+
+/* A thin, calm scrollbar - the default on most platforms reads as "unfinished webpage" at app scale. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c9cfcb transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #c9cfcb;
+  border-radius: 9999px;
+}
+
+/* Respect the safe area on notched devices when running as an installed PWA. */
+@supports (padding: max(0px)) {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}

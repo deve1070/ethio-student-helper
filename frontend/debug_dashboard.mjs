@@ -1,0 +1,20 @@
+import { chromium } from "playwright"
+
+const browser = await chromium.launch()
+const page = await browser.newPage({ viewport: { width: 400, height: 860 } })
+page.on("pageerror", (e) => console.log("pageerror:", e.message))
+page.on("console", (msg) => console.log(`console.${msg.type()}:`, msg.text()))
+
+await page.goto("http://localhost:5173/signup", { waitUntil: "networkidle" })
+const uniq = Date.now()
+await page.fill("#fullName", "Debug Student")
+await page.fill("#identifier", `debug${uniq}@example.com`)
+await page.fill("#password", "testpassword123")
+await page.click('button:has-text("Grade 12")')
+await page.click('button[type="submit"]')
+await page.waitForURL("**/", { timeout: 10000 })
+await page.waitForTimeout(2000)
+console.log("URL:", page.url())
+console.log("HTML body text:", await page.locator("body").innerText())
+await page.screenshot({ path: "/tmp/claude-1000/-home-dmk-ethio-student-helper/f6fb86e1-cf96-4ba3-957c-ed29e4f68492/scratchpad/shots/debug-dashboard.png" })
+await browser.close()
