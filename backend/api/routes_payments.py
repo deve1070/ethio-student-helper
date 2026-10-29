@@ -1,11 +1,11 @@
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+import storage
 from auth.dependencies import get_current_user, require_admin
 from config.settings import settings
 from db.models import CreditLedgerEntry, Payment, User
@@ -66,11 +66,9 @@ def submit_receipt(
     db.add(payment)
     db.flush()  # need payment.id for the receipt's filename before the first commit
 
-    receipts_dir = Path(settings.RECEIPTS_DIR)
-    receipts_dir.mkdir(parents=True, exist_ok=True)
-    receipt_path = receipts_dir / f"{payment.id}.jpg"
-    receipt_path.write_bytes(photo_bytes)
-    payment.receipt_photo_path = str(receipt_path)
+    receipt_path = f"{settings.RECEIPTS_DIR}/{payment.id}.jpg"
+    storage.upload("receipts", receipt_path, photo_bytes)
+    payment.receipt_photo_path = receipt_path
     db.commit()
 
     # Automatic check first; never guessed past what the photo actually shows (see
@@ -103,7 +101,7 @@ def submit_receipt(
     notify_admins_pending_payment(
         db,
         payment_id=payment.id,
-        receipt_photo_path=payment.receipt_photo_path,
+        receipt_photo_bytes=photo_bytes,
         student_name=user.full_name or user.phone_number or user.email or str(user.id),
         bundle=bundle,
         amount_etb=bundle_info["amount_etb"],

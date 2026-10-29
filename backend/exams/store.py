@@ -10,6 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import storage
 from llm.client import parse_json_object
 from retriever.citation import citation_for
 
@@ -888,7 +889,7 @@ def index_questions(
             "has_key": q.answer_index is not None,
         }
         unit_info = best_unit(q)  # (grade, unit, verified) or None - omit the keys entirely
-        if unit_info is not None:  # rather than pass None, which Chroma's metadata rejects
+        if unit_info is not None:  # omit the keys entirely rather than pass None as a value
             md["grade"], md["unit"], md["unit_verified"] = unit_info
         return md
 
@@ -948,14 +949,14 @@ def question_page_image(q: EsslceQuestion) -> bytes | None:
     figure/table/diagram the vision model couldn't transcribe as text. Always the literal page photo
     captured during extraction - NEVER regenerated or redrawn, so nothing here can be a fabricated
     recreation of a real exam figure. None if the paper predates `source_dir` being recorded, or the
-    expected file is missing on disk (never guessed, never a broken reference shown to a student)."""
+    expected file is missing (never guessed, never a broken reference shown to a student). Reads from
+    Supabase Storage in production, local disk in dev (storage.download's own fallback) - same relative
+    path either way, so no DB schema change was needed for the move."""
     paper = q.paper
     if not paper or not paper.source_dir or not q.printed_page:
         return None
-    path = Path(paper.source_dir) / f"p{q.printed_page:02d}.jpg"
-    if not path.is_file():
-        return None
-    return path.read_bytes()
+    path = f"{paper.source_dir}/p{q.printed_page:02d}.jpg"
+    return storage.download("exam-pages", path)
 
 
 def eligible(q: EsslceQuestion) -> bool:

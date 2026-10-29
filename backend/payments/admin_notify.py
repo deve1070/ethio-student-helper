@@ -22,7 +22,7 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 def notify_admins_pending_payment(
     db: Session,
     payment_id: uuid.UUID,
-    receipt_photo_path: str,
+    receipt_photo_bytes: bytes,
     student_name: str,
     bundle: str,
     amount_etb: float,
@@ -65,14 +65,13 @@ def notify_admins_pending_payment(
     url = TELEGRAM_API.format(token=settings.TELEGRAM_BOT_TOKEN, method="sendPhoto")
     for chat_id in admin_chat_ids:
         try:
-            with open(receipt_photo_path, "rb") as f:
-                response = httpx.post(
-                    url,
-                    data={"chat_id": chat_id, "caption": caption, "reply_markup": json.dumps(keyboard)},
-                    files={"photo": f},
-                    timeout=15,
-                )
+            response = httpx.post(
+                url,
+                data={"chat_id": chat_id, "caption": caption, "reply_markup": json.dumps(keyboard)},
+                files={"photo": receipt_photo_bytes},
+                timeout=15,
+            )
             if response.status_code >= 400:
                 logger.warning(f"Telegram push to admin {chat_id} failed: {response.text[:200]}")
-        except (httpx.HTTPError, OSError) as e:
+        except httpx.HTTPError as e:
             logger.warning(f"Telegram push to admin {chat_id} failed: {e}")
