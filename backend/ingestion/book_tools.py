@@ -1,15 +1,7 @@
-"""
-Helpers that work out, from a book's own text, what we used to find by hand:
-  - the page offset (PDF pages before printed page 1)
-  - the unit names and the PDF page where each unit starts
 
-All functions take `pages`: the text of each PDF page as a list of strings
-(use read_pages). They are plain functions, so they are easy to test.
-"""
 import re
-from collections import Counter
-
 import warnings
+from collections import Counter
 
 # Newer pypdfium2 prints a notice every time get_text_range() is called without
 # arguments. It already behaves like get_text_bounded() (the whole page), so the

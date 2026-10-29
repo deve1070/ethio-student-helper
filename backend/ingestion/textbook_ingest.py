@@ -206,6 +206,10 @@ _HEADER_STUDENT_TEXTBOOK = re.compile(
     r"^[ \t]*(?:\d+[ \t]+)?Grade \d+ [A-Za-z ]{3,40} Student[\u2019']?s? Textbook(?:[ \t]+\d+)?[ \t]*\n?",
     re.M,
 )
+# Bare lesson-number footers ("LESSON 2" alone on a line — the History book
+# prints one at the top of each lesson page). Titled lessons ("Lesson 3: ...")
+# are real headings and survive; only the bare number line is furniture.
+_FOOTER_LESSON_LINE = re.compile(r"(?m)^[ \t]*LESSON[ \t]+\d+[ \t]*$\n?", re.I)
 # Some books print an "fi"/"fl" ligature as its own glyph and the extractor
 # leaves a gap: "Defi ne", "scientifi c", "confi guration". Only joins when a
 # letter precedes the ligature and a lowercase letter follows the gap.
@@ -228,6 +232,7 @@ def _clean_text(text: str) -> str:
     text = _HEADER_GRADE_LINE.sub("", text)
     text = _HEADER_SUBJECT_GRADE.sub("", text)
     text = _HEADER_STUDENT_TEXTBOOK.sub("", text)
+    text = _FOOTER_LESSON_LINE.sub("", text)
     text = _MARGIN_UNIT.sub(" ", text)
     text = _RUNNING_FOOTER.sub("", text)
     text = _FFFE_LISTBREAK.sub("\n", text).replace("\ufffe", "-")
