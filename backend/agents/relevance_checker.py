@@ -73,8 +73,6 @@ class RelevanceChecker:
                 ]
             )
         except Exception as e:
-            # A failed call says nothing about the question. Don't tell the
-            # student it is "not related"; let the API answer "try again".
             logger.exception(f"Relevance-check LLM call failed: {e}")
             raise LLMUnavailableError(str(e)) from e
         try:

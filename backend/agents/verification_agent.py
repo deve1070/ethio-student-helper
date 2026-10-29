@@ -16,7 +16,9 @@ def _as_bool(value) -> bool:
 
 
 def _as_list(value) -> list[str]:
-    if not value or (isinstance(value, str) and value.strip().lower() in {"none", "n/a", ""}):
+    if not value or (
+        isinstance(value, str) and value.strip().lower() in {"none", "n/a", ""}
+    ):
         return []
     if isinstance(value, str):
         return [value.strip()]
@@ -146,8 +148,6 @@ class VerificationAgent:
         if parsed is None:
             return error_result("the reply was not valid JSON")
 
-        # Don't trust the boolean alone: a "supported: true" that still lists
-        # unsupported claims or contradictions is a fail.
         passed = (
             parsed["supported"]
             and parsed["relevant"]

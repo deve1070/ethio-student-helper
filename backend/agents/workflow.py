@@ -11,8 +11,7 @@ from .verification_agent import VerificationAgent
 
 logger = logging.getLogger(__name__)
 
-# Total drafts the researcher may write for one question (1 = the first draft
-# plus 1 retry). Each retry costs two more LLM calls (research + verify).
+
 MAX_RESEARCH_ATTEMPTS = 2
 
 
@@ -160,8 +159,7 @@ class AgentWorkflow:
             "verification_status": status,
             "verification_feedback": "\n".join(f"- {p}" for p in problems),
         }
-        # Out of retries and still failing: don't silently present an
-        # unchecked answer as fully grounded. Tell the student.
+
         if (
             status == "FAIL"
             and state.get("research_attempts", 0) >= MAX_RESEARCH_ATTEMPTS
@@ -170,8 +168,7 @@ class AgentWorkflow:
             if problems:
                 note += " Unconfirmed: " + "; ".join(problems)
             update["draft_answer"] = state["draft_answer"] + note
-        # The verifier itself failed (rate limit, network). The answer was NOT
-        # checked, so say so instead of presenting it as verified.
+
         if status == "ERROR":
             update["draft_answer"] = (
                 state["draft_answer"]
@@ -183,9 +180,7 @@ class AgentWorkflow:
     def _decide_after_verification(self, state: AgentState) -> str:
         status = state.get("verification_status", "")
         attempts = state.get("research_attempts", 0)
-        # Only retry when the verifier actually found a problem with the
-        # answer. "ERROR" means the verifier itself failed, which says nothing
-        # about the answer, so retrying would just burn tokens.
+
         if status == "FAIL" and attempts < MAX_RESEARCH_ATTEMPTS:
             logger.info(
                 f"Verification failed (attempt {attempts}/{MAX_RESEARCH_ATTEMPTS}); re-researching."

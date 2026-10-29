@@ -1,13 +1,7 @@
 from langchain.schema import Document
-
 from llm.client import LLMClient
 from llm.retry import LLMUnavailableError
 
-
-# Plain (non-f-string) text so backslashes and braces need no escaping.
-# The client renders $...$ / $$...$$ with KaTeX (remark-math + rehype-katex on
-# the web). \( \) delimiters are avoided because Markdown treats "\(" as an
-# escaped parenthesis and strips the backslash before the math plugin sees it.
 MATH_RULES = r"""- Write mathematics in LaTeX: inline between single dollar signs (for example $A \subseteq B$ or $x^2$) and display equations between double dollar signs ($$ ... $$). Never use \( \) or \[ \] delimiters. Keep ordinary words outside the dollar signs.
             - Never type the | character inside a table or inside math. Write \lvert x \rvert for absolute value and \mid in set-builder notation, for example $\{x \mid x > 0\}$."""
 
@@ -84,7 +78,9 @@ class ResearchAgent:
             print("LLM response received.")
         except Exception as e:
             print(f"Error during model inference: {e}")
-            raise LLMUnavailableError("Failed to generate answer due to a model error") from e
+            raise LLMUnavailableError(
+                "Failed to generate answer due to a model error"
+            ) from e
         try:
             llm_response = response["choices"][0]["message"]["content"].strip()
             print(f"Raw LLM response:\n{llm_response}")

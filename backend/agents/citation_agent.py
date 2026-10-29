@@ -1,26 +1,9 @@
-"""
-Turns retrieved chunks into structured citations the API can return
-alongside an answer, e.g.
-    {"textbook": "Biology Grade 11", "unit": "Unit 4", "page": "110-113"}
-
-Two entry points:
-  - extract(documents): from freshly retrieved LangChain Documents
-    (explain mode, and a freshly generated exam answer)
-  - resolve_chunk_ids(chunk_ids): from stored Chunk ids on a cached
-    ExamAnswer, so a cache hit can redisplay the same citations without
-    re-running retrieval
-
-Both depend on ingestion/textbook_ingest.py having written a matching
-Chunk row (keyed by vector_id) for every vector in the textbook
-collection.
-"""
 import re
 import uuid
 
-from langchain.schema import Document
-
 from db.models import Chunk, Textbook
 from db.session import SessionLocal
+from langchain.schema import Document
 
 
 def _format_page(chunk: Chunk) -> str | None:
