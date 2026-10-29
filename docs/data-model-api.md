@@ -114,15 +114,25 @@ CREATE TABLE subscriptions (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Payment transactions, gateway-agnostic
+-- Payment transactions. Manual receipt + admin approval, not a payment gateway (Chapa was
+-- dropped - no TIN/business registration; see esh_payments_manual_receipt memory). A student
+-- submits a receipt photo + the transaction id they read off it; payments/receipt_verification.py
+-- reads the photo with a vision model and auto-completes the payment only when both the
+-- transaction id and the amount match what was claimed - anything it isn't confident about stays
+-- 'pending' for a human admin (users.is_admin) to approve or reject via the Telegram bot.
 CREATE TABLE payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    gateway TEXT,                      -- 'chapa' | 'santimpay' | ...
-    gateway_tx_ref TEXT UNIQUE,
+    gateway TEXT,                      -- always 'manual' now
+    gateway_tx_ref TEXT UNIQUE,        -- our own generated reference, not a gateway's
     amount_etb NUMERIC(10,2),
     status TEXT CHECK (status IN ('initiated','pending','completed','failed','refunded')),
     credits_granted INT,
+    receipt_photo_path TEXT,
+    submitted_transaction_id TEXT,     -- what the student typed, checked against the photo
+    verification_method TEXT,          -- 'auto' | 'manual'
+    verification_note TEXT,            -- why it did or didn't auto-approve
+    reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,  -- the admin, for a manual review
     created_at TIMESTAMPTZ DEFAULT now(),
     completed_at TIMESTAMPTZ
 );
@@ -184,12 +194,14 @@ POST /v1/exam/solve
 ```
 Flow inside this endpoint: OCR if image → embed question text → similarity search against `exam_questions` → cache hit returns the stored `exam_answers` row (charges 0 or a reduced credit) → cache miss runs the full agent workflow, stores the new canonical question + answer, charges 1 credit.
 
-### Entitlements & payments
+### Entitlements & payments (manual receipt + admin approval, not a gateway)
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/v1/me/credits` | Current credit balance + active subscription status |
-| POST | `/v1/payments/checkout` | Creates a gateway checkout session, returns a redirect URL |
-| POST | `/v1/payments/webhook` | Gateway → backend callback (not client-facing); verifies signature, marks `payments.status = completed`, writes a `credit_ledger` grant |
+| POST | `/v1/payments/submit-receipt` | Student submits a bundle choice + transaction id + receipt photo; auto-completes the payment when a vision-model read of the photo confirms both, else leaves it `pending` and pushes a review notification to every admin's Telegram chat |
+| GET | `/v1/payments/pending` | Admin-only (`users.is_admin`); lists payments awaiting manual review |
+| POST | `/v1/payments/{id}/approve` | Admin-only; completes the payment and grants credits |
+| POST | `/v1/payments/{id}/reject` | Admin-only; marks the payment failed |
 
 Every paid endpoint (`/v1/exam/solve` past the free tier) checks `/v1/me/credits` server-side before running — never trust a client's local credit display.
 
@@ -198,7 +210,6 @@ Every paid endpoint (`/v1/exam/solve` past the free tier) checks `/v1/me/credits
 - Similarity threshold for exam-question cache matching (too loose → wrong cached answer served; too tight → cache barely helps)
 - Whether cached answers cost fewer credits than freshly generated ones
 - Daily free-tier cap for explain mode
-- Chapa vs SantimPay vs ArifPay — fee/reliability comparison
 - Android distribution: Play Store (Play Billing implications) vs direct APK
 
 ## 4. Suggested build order
@@ -206,7 +217,7 @@ Every paid endpoint (`/v1/exam/solve` past the free tier) checks `/v1/me/credits
 1. Textbook ingestion pipeline + vector index (grade/subject filtered)
 2. `/v1/explain` end-to-end on the web client only
 3. Exam schema + `/v1/exam/solve` with cache lookup
-4. Payments (`/v1/payments/checkout` + webhook) gated behind exam-solve
+4. Payments (`/v1/payments/submit-receipt` + admin approval) gated behind exam-solve
 5. Telegram bot as a thin client against the same API
 6. Mobile app (Flutter) last, once the API contract is stable
 
@@ -231,8 +242,8 @@ ethio-student-helper/
 │   │   ├── textbook_retriever.py    # grade/subject filtered hybrid retriever
 │   │   └── exam_cache_retriever.py  # similarity search over exam_questions
 │   ├── payments/
-│   │   ├── chapa_client.py
-│   │   ├── webhook_handler.py
+│   │   ├── receipt_verification.py  # vision-model read of a receipt photo, checked against what was claimed
+│   │   ├── admin_notify.py          # pushes a review notification to every admin's Telegram chat
 │   │   └── entitlement.py           # single guard fn every paid route calls
 │   ├── db/
 │   │   ├── models.py                # SQLAlchemy models matching section 1's schema
