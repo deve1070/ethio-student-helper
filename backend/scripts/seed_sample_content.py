@@ -1,6 +1,6 @@
 """
 Seeds one small fake textbook + a couple of chunks with known content
-into both Postgres (for citations) and the Chroma "textbooks" collection
+into both Postgres (for citations) and the "textbooks" vector collection
 (for retrieval) — so /v1/explain and /v1/exam/solve can be smoke-tested
 end to end before you have real MoE PDFs run through
 ingestion/textbook_ingest.py.
@@ -10,13 +10,11 @@ Run as: python -m scripts.seed_sample_content
 
 import uuid
 
-from langchain_community.vectorstores import Chroma
-
 from config import constants
-from config.settings import settings
 from db.models import Chunk, Textbook
 from db.session import SessionLocal
 from retriever.builder import RetrieverBuilder
+from retriever import vectorstore
 
 SAMPLE_CHUNKS = [
     {
@@ -48,10 +46,9 @@ SAMPLE_CHUNKS = [
 def main() -> None:
     db = SessionLocal()
     embeddings = RetrieverBuilder().embeddings
-    vector_store = Chroma(
+    vector_store = vectorstore.get_vector_store(
         collection_name=constants.TEXTBOOK_COLLECTION_NAME,
         embedding_function=embeddings,
-        persist_directory=settings.CHROMA_DB_PATH,
     )
 
     try:

@@ -75,11 +75,10 @@ class FakeLLM:
 stub("config")
 stub("config.constants", TEXTBOOK_COLLECTION_NAME="textbooks", CALCULATION_SUBJECTS={"mathematics"},
      LANGUAGE_SKILL_SUBJECTS={"english"})
-stub("config.settings", settings=types.SimpleNamespace(CHROMA_DB_PATH="x"))
+stub("config.settings", settings=types.SimpleNamespace(VECTOR_DATABASE_URL="x"))
 sys.modules["config"].constants = sys.modules["config.constants"]
 sys.modules["config"].settings = sys.modules["config.settings"]
-stub("langchain_community")
-stub("langchain_community.vectorstores", Chroma=lambda **kw: FakeTextbookStore())
+stub("retriever.vectorstore", get_vector_store=lambda **kw: FakeTextbookStore())
 stub("retriever.builder", RetrieverBuilder=lambda: types.SimpleNamespace(embeddings=None))
 stub("llm.client", LLMClient=lambda **kw: FakeLLM(), parse_json_object=lambda raw: json.loads(raw) if raw else None)
 

@@ -165,13 +165,13 @@ def main(argv=None):
                 store.set_duration(db, paper, args.minutes)
                 print(f"mock exam time for {paper.subject} {paper.year_ec}: {args.minutes} minutes")
             elif args.cmd in ("link", "index", "solve"):
-                from langchain_community.vectorstores import Chroma
                 from config import constants
-                from config.settings import settings
                 from retriever.builder import RetrieverBuilder
+                from retriever import vectorstore
                 emb = RetrieverBuilder().embeddings
-                tb = Chroma(collection_name=constants.TEXTBOOK_COLLECTION_NAME, embedding_function=emb,
-                            persist_directory=settings.CHROMA_DB_PATH)
+                tb = vectorstore.get_vector_store(
+                    collection_name=constants.TEXTBOOK_COLLECTION_NAME, embedding_function=emb
+                )
                 if args.cmd == "link":
                     store.link_topics(db, paper, tb)
                 elif args.cmd == "solve":
@@ -183,8 +183,9 @@ def main(argv=None):
                     # separate CLI command was forgotten (confirmed: happened to chemistry_2016 and SAT_2018)
                     store.link_topics(db, paper, tb, grades)
                 else:
-                    ex = Chroma(collection_name=constants.EXAM_COLLECTION_NAME, embedding_function=emb,
-                                persist_directory=settings.CHROMA_DB_PATH)
+                    ex = vectorstore.get_vector_store(
+                        collection_name=constants.EXAM_COLLECTION_NAME, embedding_function=emb
+                    )
                     store.index_questions(db, paper, ex, args.include_unreviewed)
     except (LookupError, FileExistsError, ValueError) as e:
         print("ERROR:", e)

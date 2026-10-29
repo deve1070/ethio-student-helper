@@ -60,11 +60,10 @@ stub(
     CALCULATION_SUBJECTS={"mathematics", "physics", "chemistry", "scholastic_aptitude_test"},
     ESSLCE_SKILL_STRAND_SUBJECTS={"english", "scholastic_aptitude_test"},
 )
-stub("config.settings", settings=types.SimpleNamespace(CHROMA_DB_PATH="x"))
+stub("config.settings", settings=types.SimpleNamespace(VECTOR_DATABASE_URL="x", SUPABASE_URL="", SUPABASE_SERVICE_KEY=""))
 sys.modules["config"].constants = sys.modules["config.constants"]
 sys.modules["config"].settings = sys.modules["config.settings"]
-stub("langchain_community")
-stub("langchain_community.vectorstores", Chroma=lambda **kw: FakeTextbookStore())
+stub("retriever.vectorstore", get_vector_store=lambda **kw: FakeTextbookStore())
 stub("retriever.builder", RetrieverBuilder=lambda: types.SimpleNamespace(embeddings=None))
 def _parse_json_object(raw):
     start, end = raw.find("{"), raw.rfind("}")

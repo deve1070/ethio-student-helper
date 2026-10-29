@@ -83,11 +83,9 @@ def main():
     ap.add_argument("--pause", type=float, default=15.0)
     args = ap.parse_args()
 
-    from langchain_community.vectorstores import Chroma
     from sqlalchemy.exc import IntegrityError
 
     from config import constants
-    from config.settings import settings
     from db.models import Chunk, Textbook
     from db.models_practice import QuizQuestion
     from db.session import SessionLocal
@@ -95,6 +93,7 @@ def main():
     from practice.generator import generate_for_passage
     from practice.validate import dup_key
     from retriever.builder import RetrieverBuilder
+    from retriever import vectorstore
 
     subject = args.subject.strip().lower()
     db = SessionLocal()
@@ -102,10 +101,10 @@ def main():
     if not books:
         sys.exit(f"No textbook for grade {args.grade}, subject '{subject}'.")
 
-    vs = Chroma(collection_name=constants.TEXTBOOK_COLLECTION_NAME,
-                embedding_function=RetrieverBuilder().embeddings,
-                persist_directory=settings.CHROMA_DB_PATH)
-    collection = vs._collection
+    vs = vectorstore.get_vector_store(
+        collection_name=constants.TEXTBOOK_COLLECTION_NAME,
+        embedding_function=RetrieverBuilder().embeddings,
+    )
     gen_llm = LLMClient(temperature=0.4, max_tokens=2500)
     solve_llm = LLMClient(temperature=0, max_tokens=800)
 
@@ -115,9 +114,9 @@ def main():
     for book in books:
         chunks = db.query(Chunk).filter(Chunk.textbook_id == book.id).all()
         by_vid = {c.vector_id: c for c in chunks}
-        docs = collection.get(ids=list(by_vid), include=["documents"])
-        rows = [(by_vid[v].unit_or_chapter, by_vid[v].section, by_vid[v].page_start, by_vid[v].page_end, v, t)
-                for v, t in zip(docs["ids"], docs["documents"]) if t]
+        docs = vs.get_by_ids(list(by_vid))
+        rows = [(by_vid[d.id].unit_or_chapter, by_vid[d.id].section, by_vid[d.id].page_start,
+                  by_vid[d.id].page_end, d.id, d.page_content) for d in docs if d.page_content]
         passages = build_passages(rows)
         if args.unit:
             passages = [p for p in passages if args.unit.lower() in (p["unit"] or "").lower()]

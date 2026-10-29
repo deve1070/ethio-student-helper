@@ -9,15 +9,29 @@ class Settings(BaseSettings):
     MAX_TOTAL_SIZE: int = MAX_TOTAL_SIZE
     ALLOWED_TYPES: list = ALLOWED_TYPES
 
-    # Vector store settings
-    CHROMA_DB_PATH: str = "./chroma_db"
-    CHROMA_COLLECTION_NAME: str = "documents"
-
     # Relational database (users, textbooks/chunks metadata, exam cache,
-    # credits, payments — see docs/data-model-api.md)
+    # credits, payments — see docs/data-model-api.md). In production this is
+    # a Supabase Postgres connection string, set via the DATABASE_URL env var.
     DATABASE_URL: str = (
         "postgresql+psycopg2://postgres:postgres@localhost:5432/ethio_student_helper"
     )
+
+    # Same database as DATABASE_URL, but on the psycopg3 driver langchain-postgres
+    # requires (SQLAlchemy's own engine above stays on psycopg2 — the two drivers
+    # coexist fine, each on its own connection string scheme).
+    VECTOR_DATABASE_URL: str = (
+        "postgresql+psycopg://postgres:postgres@localhost:5432/ethio_student_helper"
+    )
+
+    # Supabase Storage (exam diagram photos, payment receipts) — empty locally,
+    # where exams/store.py and routes_payments.py fall back to reading/writing
+    # local disk directly instead.
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_KEY: str = ""
+
+    # CORS — the Vercel frontend origin(s), comma-separated. Localhost is always
+    # allowed for local dev regardless of this setting.
+    ALLOWED_ORIGINS: str = ""
 
     # Payments: manual receipt + admin approval (Chapa dropped — no TIN/business
     # registration, see esh_payments_manual_receipt memory). TELEGRAM_BOT_TOKEN is

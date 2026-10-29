@@ -108,13 +108,11 @@ def main():
     ap.add_argument("--subject", default=None)
     args = ap.parse_args()
 
-    from langchain_community.vectorstores import Chroma
-
     from config import constants
-    from config.settings import settings
     from db.models import Chunk, Textbook
     from db.session import SessionLocal
     from retriever.builder import RetrieverBuilder
+    from retriever import vectorstore
 
     db = SessionLocal()
     q = db.query(Textbook)
@@ -125,21 +123,21 @@ def main():
     books = q.order_by(Textbook.grade, Textbook.subject).all()
     if not books:
         sys.exit("No matching textbook.")
-    vs = Chroma(collection_name=constants.TEXTBOOK_COLLECTION_NAME,
-                embedding_function=RetrieverBuilder().embeddings,
-                persist_directory=settings.CHROMA_DB_PATH)
+    vs = vectorstore.get_vector_store(
+        collection_name=constants.TEXTBOOK_COLLECTION_NAME,
+        embedding_function=RetrieverBuilder().embeddings,
+    )
     for book in books:
         chunks = db.query(Chunk).filter(Chunk.textbook_id == book.id).all()
         by_vid = {c.vector_id: c for c in chunks}
-        docs = vs._collection.get(ids=list(by_vid), include=["documents"])
-        stored = dict(zip(docs["ids"], docs["documents"]))
+        stored = {d.id: d.page_content for d in vs.get_by_ids(list(by_vid))}
         missing = [v for v in by_vid if not stored.get(v)]
         rows = [(c.unit_or_chapter, c.page_start, c.page_end, v, stored[v]) for v, c in by_vid.items() if stored.get(v)]
         rep = analyze(rows)
         print(f"\n=== {book.title}  (grade {book.grade}, {book.subject})")
         print(f"chunks: {rep['chunks']}   median {rep['chars_median']} chars, mean {rep['chars_mean']}")
         if missing:
-            print(f"WARNING: {len(missing)} database chunks have no vector in Chroma (interrupted ingestion?)")
+            print(f"WARNING: {len(missing)} database chunks have no vector in the store (interrupted ingestion?)")
         print("\nunit".ljust(58), "chunks   pages")
         for unit, d in rep["units"].items():
             print(f"{str(unit)[:56]:<57}{d['chunks']:>6}   {d['p0']}-{d['p1']}")

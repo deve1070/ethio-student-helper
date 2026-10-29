@@ -14,7 +14,6 @@ import base64
 from auth.dependencies import get_current_user
 from config import constants
 from config.constants import CALCULATION_SUBJECTS
-from config.settings import settings
 from db.models import User
 from db.session import get_db
 from exams.latex_render import render_latex_png
@@ -34,30 +33,26 @@ from exams.store import (
     student_progress,
 )
 from fastapi import APIRouter, Depends, HTTPException
-from langchain_community.vectorstores import Chroma
 from llm.client import LLMClient
 from practice.selection import classify_level, daily_trend, pick_questions
 from pydantic import BaseModel, Field
 from retriever.builder import RetrieverBuilder
+from retriever import vectorstore
 from sqlalchemy.orm import Session
 from typing import Literal
 
 router = APIRouter(prefix="/v1/esslce", tags=["esslce"])
 
 # The embeddings model (HuggingFace, loaded once - the expensive part) is cached for the process, matching
-# retriever/builder.py's own RetrieverBuilder. The Chroma CLIENT itself is deliberately NOT cached here: a
-# long-lived Chroma client leaks bad internal consumer/queue state over time (seen directly: repeated
-# "invoking consumer ... Label not found" / "Delete of nonexisting embedding ID" spam once this connection
-# had been open a while) - retriever/builder.py's build_textbook_retriever already establishes the working
-# pattern for this codebase: build a fresh, short-lived Chroma client per request, never keep one open.
+# retriever/builder.py's own RetrieverBuilder. Built fresh per request, matching
+# retriever/builder.py's build_textbook_retriever - cheap (a pgvector connection, not an embeddings load).
 _embeddings = RetrieverBuilder().embeddings
 
 
-def _fresh_textbook_store() -> Chroma:
-    return Chroma(
+def _fresh_textbook_store():
+    return vectorstore.get_vector_store(
         collection_name=constants.TEXTBOOK_COLLECTION_NAME,
         embedding_function=_embeddings,
-        persist_directory=settings.CHROMA_DB_PATH,
     )
 
 

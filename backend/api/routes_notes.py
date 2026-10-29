@@ -8,30 +8,28 @@ import base64
 
 from auth.dependencies import get_current_user
 from config import constants
-from config.settings import settings
 from db.models import User
 from db.session import get_db
 from exams.latex_render import render_latex_png, wrap_as_math
 from fastapi import APIRouter, Depends, HTTPException
-from langchain_community.vectorstores import Chroma
 from llm.client import LLMClient
 from notes.store import available_subjects, available_units, get_or_create_note
 from pydantic import BaseModel
 from retriever.builder import RetrieverBuilder
+from retriever import vectorstore
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/v1/notes", tags=["notes"])
 
-# Same "cache the expensive embeddings model, build a fresh short-lived Chroma client per request"
-# pattern as api/routes_esslce.py - a long-lived Chroma client leaks bad internal consumer/queue state.
+# Same "cache the expensive embeddings model, build a fresh short-lived store per request"
+# pattern as api/routes_esslce.py.
 _embeddings = RetrieverBuilder().embeddings
 
 
-def _fresh_textbook_store() -> Chroma:
-    return Chroma(
+def _fresh_textbook_store():
+    return vectorstore.get_vector_store(
         collection_name=constants.TEXTBOOK_COLLECTION_NAME,
         embedding_function=_embeddings,
-        persist_directory=settings.CHROMA_DB_PATH,
     )
 
 

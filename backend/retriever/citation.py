@@ -7,7 +7,7 @@ from db.models import Chunk, Textbook
 def citation_for(db, vector_id: str | None) -> dict | None:
     """The structured {textbook, grade, subject, unit_or_chapter, section, page_start, page_end} a
     grounding quote actually came from - looked up from Chunk/Textbook by vector_id (the same uuid
-    textbook_ingest.py writes into both the Chroma document's metadata and the Chunk row, so this is an
+    textbook_ingest.py writes into both the vector store document's metadata and the Chunk row, so this is an
     exact join, never a guess). A page number is exactly the kind of fact an LLM must never be trusted to
     state on its own - this is the only place that field is ever set. None if there's no vector_id (e.g.
     an ESSLCE reading-comprehension question grounded in the exam's own passage, not a textbook) or the

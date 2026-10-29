@@ -1,13 +1,12 @@
 
 import uuid
 
-from langchain_community.vectorstores import Chroma
 from sqlalchemy.orm import Session
 
 from config import constants
-from config.settings import settings
 from db.models import ExamAnswer, ExamQuestion
 from retriever.builder import RetrieverBuilder
+from retriever import vectorstore
 from utils.logging import logger
 
 
@@ -17,10 +16,9 @@ CACHE_DISTANCE_THRESHOLD = 0.15
 class ExamCache:
     def __init__(self):
         self.embeddings = RetrieverBuilder().embeddings
-        self.vector_store = Chroma(
+        self.vector_store = vectorstore.get_vector_store(
             collection_name=constants.EXAM_CACHE_COLLECTION_NAME,
             embedding_function=self.embeddings,
-            persist_directory=settings.CHROMA_DB_PATH,
         )
 
     def find_cached_answer(

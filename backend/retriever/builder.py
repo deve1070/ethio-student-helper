@@ -1,4 +1,4 @@
-from langchain_community.vectorstores import Chroma
+import uuid
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import EnsembleRetriever
@@ -6,6 +6,7 @@ from config import constants
 from config.settings import settings
 import logging
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from retriever import vectorstore
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +31,13 @@ class RetrieverBuilder:
         Used by the original docchat ad-hoc upload flow — unchanged.
         """
         try:
-            # Create Chroma vector store
-            vector_store = Chroma.from_documents(
+            # A fresh collection per call - this is session-scoped debug tooling (app.py's
+            # Gradio UI only, never the production path), so uploads from different sessions
+            # must never share one collection.
+            vector_store = vectorstore.from_documents(
                 documents=docs,
                 embedding=self.embeddings,
-                persist_directory=settings.CHROMA_DB_PATH,
+                collection_name=f"upload-{uuid.uuid4()}",
             )
             logger.info("Vector store created successfully.")
             bm25 = BM25Retriever.from_documents(docs)
@@ -59,17 +62,16 @@ class RetrieverBuilder:
         permanent textbook index built by ingestion/textbook_ingest.py.
 
         Unlike build_hybrid_retriever, this does NOT build a new index —
-        it queries the existing persisted Chroma collection, filtered by
+        it queries the existing persisted vector collection, filtered by
         metadata, so it's cheap to call on every /v1/explain request.
         BM25 is skipped here since it needs the full corpus, not a
         metadata-filtered slice; revisit if vector-only recall proves
         insufficient for a given subject.
         """
         try:
-            vector_store = Chroma(
+            vector_store = vectorstore.get_vector_store(
                 collection_name=constants.TEXTBOOK_COLLECTION_NAME,
                 embedding_function=self.embeddings,
-                persist_directory=settings.CHROMA_DB_PATH,
             )
             retriever = vector_store.as_retriever(
                 search_kwargs={

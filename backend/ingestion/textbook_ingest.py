@@ -34,7 +34,7 @@ from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.chunker import HierarchicalChunker
-from langchain_community.vectorstores import Chroma
+from retriever import vectorstore
 
 from config import constants
 from config.settings import settings
@@ -406,10 +406,10 @@ def list_status(db, vector_store, root: Path, grades: list[int] | None = None) -
         print("  (nothing)")
     if vector_store is not None:
         all_rows = db.query(Chunk).count()
-        vectors = vector_store._collection.count()
+        vectors = vectorstore.collection_count(constants.TEXTBOOK_COLLECTION_NAME)
         verdict = "OK" if vectors == all_rows else (
             f"MISMATCH: {abs(vectors - all_rows)} {'vectors with no database row (leftovers)' if vectors > all_rows else 'database rows with no vector'}")
-        print(f"\nChroma vectors: {vectors}   database chunks: {all_rows}   -> {verdict}")
+        print(f"\nVector store rows: {vectors}   database chunks: {all_rows}   -> {verdict}")
 
 
 def remove_books(db, vector_store, subjects: set[str], grades: list[int] | None,
@@ -480,10 +480,9 @@ def ingest_all(
         )
         chunker = HierarchicalChunker()
         embeddings = RetrieverBuilder().embeddings
-        vector_store = Chroma(
+        vector_store = vectorstore.get_vector_store(
             collection_name=constants.TEXTBOOK_COLLECTION_NAME,
             embedding_function=embeddings,
-            persist_directory=settings.CHROMA_DB_PATH,
         )
 
     skipped: list[str] = []
@@ -619,10 +618,11 @@ def ingest_all(
 
 
 def _open_store_and_db():
-    """Real database session and Chroma store (used by --status and --remove)."""
+    """Real database session and vector store (used by --status and --remove)."""
     embeddings = RetrieverBuilder().embeddings
-    store = Chroma(collection_name=constants.TEXTBOOK_COLLECTION_NAME,
-                   embedding_function=embeddings, persist_directory=settings.CHROMA_DB_PATH)
+    store = vectorstore.get_vector_store(
+        collection_name=constants.TEXTBOOK_COLLECTION_NAME, embedding_function=embeddings
+    )
     return SessionLocal(), store
 
 

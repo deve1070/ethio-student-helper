@@ -445,13 +445,18 @@ sys.modules["db.session"] = types.SimpleNamespace(SessionLocal=Session)
 import exams.extract as EX
 EX.make_groq_call = lambda model_id, has_sections=True: fake_vision_for(MARKUP)
 stub = lambda name, **a: sys.modules.setdefault(name, types.SimpleNamespace(**a))
-sys.modules["langchain_community"] = types.ModuleType("langchain_community")
-sys.modules["langchain_community.vectorstores"] = types.SimpleNamespace(Chroma=lambda collection_name, embedding_function, persist_directory: FakeTextbooks() if collection_name == "textbooks" else FakeIndex())
+sys.modules["retriever.vectorstore"] = types.SimpleNamespace(get_vector_store=lambda collection_name, embedding_function: FakeTextbooks() if collection_name == "textbooks" else FakeIndex())
+# exams/store.py's own real import of retriever.citation (above, never stubbed in this file) already
+# really imported retriever/builder.py, which already really imported retriever.vectorstore - so the real
+# "retriever" package object already carries a real .vectorstore attribute from that import. Overwriting
+# sys.modules alone doesn't retroactively fix an attribute already resolved before this point.
+import retriever as _retriever_pkg
+_retriever_pkg.vectorstore = sys.modules["retriever.vectorstore"]
 sys.modules["config"] = types.ModuleType("config")
 sys.modules["config.constants"] = types.SimpleNamespace(
     TEXTBOOK_COLLECTION_NAME="textbooks", EXAM_COLLECTION_NAME="esslce_exams"
 )
-sys.modules["config.settings"] = types.SimpleNamespace(settings=types.SimpleNamespace(CHROMA_DB_PATH="x"))
+sys.modules["config.settings"] = types.SimpleNamespace(settings=types.SimpleNamespace(VECTOR_DATABASE_URL="x"))
 sys.modules["config"].constants = sys.modules["config.constants"]; sys.modules["config"].settings = sys.modules["config.settings"]
 sys.modules["retriever.builder"] = types.SimpleNamespace(RetrieverBuilder=lambda: types.SimpleNamespace(embeddings=None))
 sys.modules["llm.client"] = types.SimpleNamespace(LLMClient=lambda **kw: FakeLLM(json.dumps({"answer_index": -1})))

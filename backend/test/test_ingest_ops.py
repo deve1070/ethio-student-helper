@@ -4,18 +4,18 @@ def stub(name, **a):
     m=types.ModuleType(name); m.__dict__.update(a); sys.modules[name]=m; return m
 class _X:
     def __init__(s,*a,**k): pass
-for n in ["docling","docling.backend","docling.backend.pypdfium2_backend","docling.datamodel","docling.datamodel.base_models","docling.datamodel.pipeline_options","docling.document_converter","docling_core","docling_core.transforms","docling_core.transforms.chunker","langchain_community","langchain_community.vectorstores","config","config.constants","config.settings","db.session","retriever","retriever.builder","utils.logging"]:
+for n in ["docling","docling.backend","docling.backend.pypdfium2_backend","docling.datamodel","docling.datamodel.base_models","docling.datamodel.pipeline_options","docling.document_converter","docling_core","docling_core.transforms","docling_core.transforms.chunker","config","config.constants","config.settings","db.session","retriever","retriever.builder","retriever.vectorstore","utils.logging"]:
     stub(n)
 sys.modules["docling.backend.pypdfium2_backend"].PyPdfiumDocumentBackend=_X
 sys.modules["docling.datamodel.base_models"].InputFormat=types.SimpleNamespace(PDF=1)
 sys.modules["docling.datamodel.pipeline_options"].PdfPipelineOptions=_X
 sys.modules["docling.document_converter"].DocumentConverter=_X; sys.modules["docling.document_converter"].PdfFormatOption=_X
 sys.modules["docling_core.transforms.chunker"].HierarchicalChunker=_X
-sys.modules["langchain_community.vectorstores"].Chroma=_X
 consts=types.SimpleNamespace(SUPPORTED_GRADES=[9,10,11,12],TEXTBOOK_CONTENT_ROOT="x",TEXTBOOK_COLLECTION_NAME="t")
 sys.modules["config"].constants=consts; sys.modules["config.constants"]=consts
-sys.modules["config.settings"].settings=types.SimpleNamespace(CHROMA_DB_PATH="x")
+sys.modules["config.settings"].settings=types.SimpleNamespace(VECTOR_DATABASE_URL="x")
 sys.modules["retriever.builder"].RetrieverBuilder=_X
+sys.modules["retriever.vectorstore"].get_vector_store=_X
 sys.modules["utils.logging"].logger=logging.getLogger("t")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -66,9 +66,8 @@ allp=ing(dry()); print("sample plan line:", allp[0].strip()); assert all("offset
 class Store:
     def __init__(s): s.deleted=[]; s.n=0
     def delete(s,ids): s.deleted+=list(ids)
-    @property
-    def _collection(s): return types.SimpleNamespace(count=lambda: s.n)
 db=Session(); store=Store(); vids={}
+sys.modules["retriever.vectorstore"].collection_count=lambda collection_name: store.n
 def add_book(grade, subject, n=3):
     path=str(Path(root)/f"grade_{grade}"/subject/f"{subject.title()} Grade {grade}.pdf")
     tb=M.Textbook(id=uuid.uuid4(),grade=grade,subject=subject,title=f"{subject.title()} Grade {grade}",source_file_path=path); db.add(tb); db.flush()
