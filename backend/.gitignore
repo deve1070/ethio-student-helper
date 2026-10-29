@@ -5,5 +5,6 @@ chroma_db/
 venv/
 app.log
 document_cache/
+receipts/  # students' real payment receipt photos - personal financial data, never committed
 .vscode
 /.vscode
