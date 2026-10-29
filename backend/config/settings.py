@@ -19,9 +19,12 @@ class Settings(BaseSettings):
         "postgresql+psycopg2://postgres:postgres@localhost:5432/ethio_student_helper"
     )
 
-    # Chapa payment gateway — set via environment, never commit real values
-    CHAPA_SECRET_KEY: str = ""
-    CHAPA_WEBHOOK_SECRET: str = ""
+    # Payments: manual receipt + admin approval (Chapa dropped — no TIN/business
+    # registration, see esh_payments_manual_receipt memory). TELEGRAM_BOT_TOKEN is
+    # read here (not just by telegram_bot/config.py) so the backend can push a
+    # receipt-needs-review notification straight to an admin's Telegram chat.
+    TELEGRAM_BOT_TOKEN: str = ""
+    RECEIPTS_DIR: str = "receipts"
 
     # Auth — JWT_SECRET_KEY MUST be overridden via environment in any
     # real deployment; this default is only safe for local dev
@@ -53,6 +56,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # .env is shared with telegram_bot/config.py (e.g. TELEGRAM_BOT_TOKEN),
+        # which this Settings class doesn't declare a field for and doesn't need to
 
 
 settings = Settings()
