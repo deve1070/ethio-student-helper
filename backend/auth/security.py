@@ -1,8 +1,4 @@
-"""
-Password hashing and JWT issuance/verification. Used by api/routes_auth.py
-to issue tokens on signup/login/telegram-link, and by
-auth/dependencies.py to verify them on every protected route.
-"""
+
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 

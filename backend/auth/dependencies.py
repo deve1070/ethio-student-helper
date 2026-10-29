@@ -1,10 +1,4 @@
-"""
-FastAPI dependency that resolves the bearer token on a request into a
-User row. Every protected route takes `user: User = Depends(get_current_user)`
-instead of trusting a user_id in the request body — this closes the
-trust gap flagged when payments and exam-solve first shipped (both
-previously took a bare user_id from the client).
-"""
+
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWTError
@@ -29,4 +23,10 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
     return user
