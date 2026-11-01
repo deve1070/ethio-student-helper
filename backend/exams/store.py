@@ -1041,9 +1041,15 @@ def _diagram_image_exists(storage_path: str) -> bool:
     A photo's existence never changes once uploaded, so this caches True/False indefinitely per
     worker process; a failed check returns False (not eligible) rather than raising, since a
     flaky storage call must never crash the caller - the question simply won't count as eligible
-    until the next successful check, which is a far smaller problem than taking down the service."""
+    until the next successful check, which is a far smaller problem than taking down the service.
+
+    A short timeout (vs. download()'s default 30s): also confirmed live that a slow/unreachable
+    Storage call just made the whole thing hang well past 30s, with the single worker and every
+    other request queued behind it, rather than failing fast - there is no student waiting on
+    THIS specific photo the way there is at question_page_image()'s own call site, so there is
+    nothing to gain from a long wait here, only something to lose."""
     try:
-        return storage.download("exam-pages", storage_path) is not None
+        return storage.download("exam-pages", storage_path, timeout=4) is not None
     except Exception:  # noqa: BLE001 - any failure here must degrade, never crash the caller
         return False
 
