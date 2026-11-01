@@ -136,6 +136,15 @@ app.dependency_overrides[R.get_db] = _db
 app.dependency_overrides[R.get_current_user] = lambda: None
 c = TestClient(app)
 
+
+def note_result(r) -> dict:
+    """/v1/notes/note now streams SSE progress events (api/routes_notes.py's _note_events)
+    instead of one plain JSON response - this parses the stream and returns the final
+    {"done": true, ...} event's payload, the same fields the old plain response had."""
+    import json as _json
+    events = [_json.loads(line[len("data: "):]) for line in r.text.split("\n\n") if line.startswith("data: ")]
+    return events[-1]
+
 # ---- 1. /subjects, /units: from the real textbook corpus, natural unit order -----------------------------
 r = c.get("/v1/notes/subjects", params={"grade": 10})
 assert r.json() == {"grade": 10, "subjects": ["mathematics"]}, r.json()
@@ -148,7 +157,8 @@ assert r.json()["subjects"] == [], r.json()  # no grade-11 content at all
 
 # ---- 2. /note: ungroundable topic (no chunks at all) -------------------------------------------------------
 r = c.get("/v1/notes/note", params={"grade": 10, "subject": "mathematics", "unit": "No Such Unit"})
-assert r.status_code == 422, r.text
+assert r.status_code == 200, r.text  # still a 200 - the stream already started; the failure is a "done"+error event
+assert "error" in note_result(r), r.text
 
 # ---- 3. /note: hierarchical sections - a bad quote in one section is dropped, not fatal to the whole note --
 llm_state["unit"] = {
@@ -179,7 +189,7 @@ llm_state["unit"] = {
 }
 r = c.get("/v1/notes/note", params={"grade": 10, "subject": "mathematics", "unit": "Unit 2: Limits and Continuity"})
 assert r.status_code == 200, r.text
-b = r.json()
+b = note_result(r)
 assert b["overview"] == llm_state["unit"]["overview"]
 assert b["is_calculation"] is True  # mathematics is in CALCULATION_SUBJECTS (stubbed to just {"mathematics"})
 # only 2 of the 3 proposed sections survive verification - the unsupported "One-Sided Limits" one is dropped
@@ -196,12 +206,13 @@ assert db2.query(NM.StudyNote).count() == 1
 # ---- 4. cached after the first call (LLM never called again for the same topic) ----------------------------
 llm_state["unit"] = {"overview": "DIFFERENT - should never be seen, this call must be served from cache", "sections": []}
 r2 = c.get("/v1/notes/note", params={"grade": 10, "subject": "mathematics", "unit": "Unit 2: Limits and Continuity"})
-assert r2.json()["overview"] == b["overview"], r2.json()  # unchanged - cached, not regenerated
+assert note_result(r2)["overview"] == b["overview"], r2.text  # unchanged - cached, not regenerated
 
-# ---- 5. a provider failure (rate limit, request-too-large, network) degrades to a clean 422, never a 500 ---
+# ---- 5. a provider failure (rate limit, request-too-large, network) degrades to a clean error event, never a 500 ---
 llm_state["raise_error"] = True
 r = c.get("/v1/notes/note", params={"grade": 10, "subject": "mathematics", "unit": "Unit 9: Provider Error"})
-assert r.status_code == 422, r.text  # not 500 - api/routes_notes.py's normal "couldn't ground this" response
+assert r.status_code == 200, r.text  # not 500 - api/routes_notes.py's normal "couldn't ground this" response
+assert "error" in note_result(r), r.text
 llm_state["raise_error"] = False
 assert db.query(NM.StudyNote).filter(NM.StudyNote.unit == "Unit 9: Provider Error").count() == 0  # nothing cached
 

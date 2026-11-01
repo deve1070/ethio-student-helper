@@ -2,52 +2,22 @@
 // wrapper handles the bearer token and error shape consistently; everything else here just
 // types the request/response bodies so a typo in a field name is a compile error, not a runtime
 // one discovered by a student.
+//
+// The token/ApiError primitives themselves live in ./apiAuth, re-exported below so every
+// existing `import { errorMessage, setToken, ... } from "./api"` keeps working unchanged -
+// they moved out so lib/sse.ts (which explain.ask/notes.note below depend on) can use them
+// without importing this file back and creating a circular module dependency.
+import { ApiError, BASE, getToken, notifyUnauthorized, setToken } from "./apiAuth"
+import { streamGet, streamPost } from "./sse"
 
-const BASE = import.meta.env.VITE_API_BASE_URL ?? ""
-
-export class ApiError extends Error {
-  status: number
-  detail: unknown
-  constructor(status: number, detail: unknown) {
-    super(typeof detail === "string" ? detail : JSON.stringify(detail))
-    this.status = status
-    this.detail = detail
-  }
-}
-
-function friendlyDetail(detail: unknown): string {
-  if (typeof detail === "string") return detail
-  if (detail && typeof detail === "object" && "message" in detail) {
-    return String((detail as { message: unknown }).message)
-  }
-  return "Something went wrong. Please try again."
-}
-
-export function errorMessage(e: unknown): string {
-  if (e instanceof ApiError) return friendlyDetail(e.detail)
-  return "Couldn't reach the server. Check your connection and try again."
-}
-
-let token: string | null = localStorage.getItem("esh_token")
-let onUnauthorized: (() => void) | null = null
-
-export function setToken(t: string | null) {
-  token = t
-  if (t) localStorage.setItem("esh_token", t)
-  else localStorage.removeItem("esh_token")
-}
-export function getToken() {
-  return token
-}
-export function setUnauthorizedHandler(fn: () => void) {
-  onUnauthorized = fn
-}
+export * from "./apiAuth"
 
 async function request<T>(
   path: string,
   options: { method?: string; body?: unknown; isForm?: boolean } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {}
+  const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
   let body: BodyInit | undefined
   if (options.isForm) {
@@ -59,7 +29,7 @@ async function request<T>(
   const res = await fetch(`${BASE}${path}`, { method: options.method ?? "GET", headers, body })
   if (res.status === 401) {
     setToken(null)
-    onUnauthorized?.()
+    notifyUnauthorized()
   }
   if (!res.ok) {
     let detail: unknown = res.statusText
@@ -145,8 +115,12 @@ export interface ExplainResponse {
   credits_charged: number
 }
 export const explain = {
-  ask: (grade: number, subject: string, question: string) =>
-    post<ExplainResponse>("/v1/explain", { grade, subject, question }),
+  // Streams progress ("Writing an answer...", etc.) via onStage while the backend works through
+  // its multi-step pipeline (api/routes_explain.py), resolving with the final answer once done.
+  ask: (grade: number, subject: string, question: string, onStage: (stage: string) => void) =>
+    streamPost("/v1/explain", { grade, subject, question }, (e) => {
+      if (e.stage) onStage(e.stage)
+    }).then((e) => e as unknown as ExplainResponse),
 }
 
 // ---------------------------------------------------------------- practice
@@ -233,6 +207,8 @@ export const practice = {
 export interface EsslceQuestion {
   id: number
   item_no: number
+  year_ec: number
+  booklet_code: string | null
   stem: string
   options: string[]
   passage_text: string | null
@@ -311,6 +287,8 @@ export interface EsslceProgress {
 export interface EsslceMistake {
   question_id: number
   item_no: number
+  year_ec: number
+  booklet_code: string | null
   stem: string
   options: string[]
   passage_text: string | null
@@ -435,8 +413,13 @@ export const notes = {
   subjects: (grade: number) => get<{ grade: number; subjects: string[] }>("/v1/notes/subjects", { grade }),
   units: (grade: number, subject: string) =>
     get<{ grade: number; subject: string; units: string[] }>("/v1/notes/units", { grade, subject }),
-  note: (grade: number, subject: string, unit: string) =>
-    get<StudyNote>("/v1/notes/note", { grade, subject, unit }),
+  // Streams progress ("Reading your textbook...", etc.) via onStage while the backend works
+  // through notes/store.py's generation steps, resolving with the finished note (cache hits
+  // resolve immediately with no stage events at all - there's nothing to report).
+  note: (grade: number, subject: string, unit: string, onStage: (stage: string) => void) =>
+    streamGet("/v1/notes/note", { grade, subject, unit }, (e) => {
+      if (e.stage) onStage(e.stage)
+    }).then((e) => e as unknown as StudyNote),
 }
 
 // ---------------------------------------------------------------- payments

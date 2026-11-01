@@ -35,14 +35,18 @@ def friendly_practice_error(e: BackendError) -> str:
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str) -> None:
+    # effective_message, not message: this also runs when the main menu's Practice/Progress
+    # button (bot.py's menu_callback) calls this same function with a CallbackQuery-type Update,
+    # which has no .message of its own - effective_message resolves to the button's own message
+    # in that case, the typed command's message in the usual case.
     user_id = update.effective_user.id
     if not api_client.is_logged_in(user_id):
-        await update.message.reply_text(LOGIN_FIRST)
+        await update.effective_message.reply_text(LOGIN_FIRST)
         return
     session = PracticeSession(api_client, user_id, mode)
     context.user_data[SESSION_KEY] = session
     screen = session.start()
-    await update.message.reply_text(screen.text, reply_markup=keyboard(screen))
+    await update.effective_message.reply_text(screen.text, reply_markup=keyboard(screen))
 
 
 async def practice_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

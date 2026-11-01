@@ -7,10 +7,15 @@ from telegram_bot.api_client import BackendError
 
 
 async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # effective_message, not message: also called from bot.py's menu_callback with a
+    # CallbackQuery-type Update when the main menu's Login button is tapped - that never carries
+    # typed args, so it always lands on the usage reply below. There's no button alternative to
+    # typing the password itself: Telegram buttons can only trigger a fixed callback_data, never
+    # collect open text, so this command stays typed either way.
     telegram_user_id = update.effective_user.id
-    args = context.args
+    args = context.args or []
     if len(args) != 2:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "Usage: /login <phone or email> <password>\n"
             "(Sign up first on the web app if you don't have an account yet.)"
         )
@@ -40,11 +45,13 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def logout_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Forget the saved login and the daily reminder (useful on a shared phone)."""
+    """Forget the saved login and the daily reminder (useful on a shared phone). effective_message,
+    not message: also called from bot.py's menu_callback when the main menu's Logout button is
+    tapped - this one needs no typed input at all, so the button form fully replaces typing it."""
     uid = update.effective_user.id
     api_client.logout(uid)
     bot_store.get_store().drop_reminder(uid)
     reminders.cancel_reminder(context.application.job_queue, uid)
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "Logged out. Your reminder is off too. Use /login to come back."
     )

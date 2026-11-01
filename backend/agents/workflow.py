@@ -14,6 +14,17 @@ logger = logging.getLogger(__name__)
 
 MAX_RESEARCH_ATTEMPTS = 2
 
+# Human-readable label for each graph node, shown to the student while /v1/explain
+# streams progress (api/routes_explain.py). A node can run more than once (the
+# re-research loop below), so the same label can be yielded twice in one request -
+# that's accurate, not a bug: the pipeline really did go back and research again.
+_STAGE_LABELS = {
+    "check_relevance": "Checking if your textbook covers this...",
+    "research": "Writing an answer...",
+    "cite": "Finding the right pages...",
+    "verify": "Double-checking the answer...",
+}
+
 
 class AgentState(TypedDict):
     question: str
@@ -118,6 +129,45 @@ class AgentWorkflow:
             }
         except Exception as e:
             logger.error(f"Workflow execution failed: {e}")
+            raise
+
+    def stream_full_pipeline(self, question: str, retriever):
+        """Same pipeline as full_pipeline, but yields a human-readable label as each
+        graph node completes (for /v1/explain's SSE progress stream), then finally
+        yields the same result dict full_pipeline returns. compiled_workflow.stream()
+        yields one {node_name: state_delta} dict per completed node (confirmed against
+        this project's installed langgraph version) rather than the accumulated state
+        full_pipeline's .invoke() returns, so the deltas are merged into running_state
+        here to rebuild that same final shape."""
+        try:
+            logger.debug(f"Starting stream_full_pipeline with question='{question}'")
+            documents = retriever.invoke(question)
+            logger.info(f"Retrieved {len(documents)} relevant documents")
+            running_state = AgentState(
+                question=question,
+                documents=documents,
+                draft_answer="",
+                citations=[],
+                verification_report="",
+                is_relevant=False,
+                retriever=retriever,
+                research_attempts=0,
+                verification_status="",
+                verification_feedback="",
+            )
+            for step in self.compiled_workflow.stream(running_state):
+                node_name, delta = next(iter(step.items()))
+                running_state.update(delta)
+                yield _STAGE_LABELS.get(node_name, node_name)
+            yield {
+                "draft_answer": running_state.get("draft_answer"),
+                "citations": running_state.get("citations", []),
+                "verification_report": running_state.get("verification_report"),
+                "is_relevant": bool(running_state.get("is_relevant")),
+                "verification_status": running_state.get("verification_status", ""),
+            }
+        except Exception as e:
+            logger.error(f"Streaming workflow execution failed: {e}")
             raise
 
     def _research_step(self, state: AgentState) -> dict:

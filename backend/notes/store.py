@@ -11,6 +11,7 @@ own printed subsection numbers: real ingested chunk.section metadata is too inco
 trailing caption or figure label, not a clean heading) to reconstruct the book's actual numbering."""
 
 import re
+from typing import Callable
 
 from config.constants import CALCULATION_SUBJECTS, LANGUAGE_SKILL_SUBJECTS
 from db.models import Chunk, Textbook
@@ -321,11 +322,22 @@ the whole set) and its own example sentence marked "Example:". Reply with ONLY t
 text - no JSON, no heading, no quotation marks around it, nothing else."""
 
 
-def generate_note(db, llm, tb_store, grade: int, subject: str, unit: str) -> dict:
+def generate_note(
+    db, llm, tb_store, grade: int, subject: str, unit: str,
+    on_stage: Callable[[str], None] | None = None,
+) -> dict:
     """{"resolved": False} if nothing could be grounded; otherwise the full set of StudyNote fields.
     Never raises past this function - any LLM-provider error (rate limit, request-too-large, network)
-    degrades to the same unresolved result a genuinely ungroundable topic gets, rather than a raw 500."""
+    degrades to the same unresolved result a genuinely ungroundable topic gets, rather than a raw 500.
+    on_stage, if given, is called with a short human-readable label before each real step below, for
+    api/routes_notes.py's SSE progress stream - a plain callback, not a generator, since this function
+    is already a long, mostly-linear sequence of steps rather than a graph (contrast with
+    agents/workflow.py's AgentWorkflow.stream_full_pipeline, which streams via LangGraph's own
+    per-node mechanism because that pipeline already IS a graph)."""
+    if on_stage is None:
+        on_stage = lambda _label: None  # noqa: E731
     unresolved = {"resolved": False}
+    on_stage("Reading your textbook...")
     docs = _cap_by_chars(_retrieve_unit(tb_store, grade, subject, unit))
     if not docs:
         return unresolved
@@ -339,6 +351,8 @@ def generate_note(db, llm, tb_store, grade: int, subject: str, unit: str) -> dic
         prompt = ENGLISH_UNIT_PROMPT.format(grade=grade, unit=unit, context=context)
     else:
         prompt = UNIT_PROMPT.format(grade=grade, subject=subject, unit=unit, context=context)
+
+    on_stage("Writing your notes...")
 
     # ENGLISH_UNIT_PROMPT's requirement that every point come with a real example (never just a bare
     # definition/rule statement) is NOT reliably followed every call - confirmed for real: the identical
@@ -373,6 +387,7 @@ def generate_note(db, llm, tb_store, grade: int, subject: str, unit: str) -> dic
         return unresolved
     data = best_data
 
+    on_stage("Adding page references...")
     sections = _numbered_sections(db, data, excerpts, vector_ids, _unit_number(unit))
     if not sections:
         return unresolved
@@ -386,6 +401,7 @@ def generate_note(db, llm, tb_store, grade: int, subject: str, unit: str) -> dic
     # section's summary - same citation, same number, only the explanation improved - is what actually
     # gets there.
     if is_english:
+        on_stage("Double-checking examples...")
         for i in _judge_sections(llm, sections, grade):
             s = sections[i]
             try:
@@ -416,6 +432,7 @@ def generate_note(db, llm, tb_store, grade: int, subject: str, unit: str) -> dic
     }
 
     if is_calculation:
+        on_stage("Adding formulas and a worked example...")
         try:
             raw2 = (
                 llm.chat(
@@ -444,9 +461,14 @@ def generate_note(db, llm, tb_store, grade: int, subject: str, unit: str) -> dic
     return result
 
 
-def get_or_create_note(db, llm, tb_store, grade: int, subject: str, unit: str) -> StudyNote | None:
+def get_or_create_note(
+    db, llm, tb_store, grade: int, subject: str, unit: str,
+    on_stage: Callable[[str], None] | None = None,
+) -> StudyNote | None:
     """The cache lookup + generate-on-miss entry point every caller should use - never call
-    generate_note directly from a route, or every request becomes a fresh (slow, costly) LLM call."""
+    generate_note directly from a route, or every request becomes a fresh (slow, costly) LLM call.
+    on_stage is only ever actually called on a cache miss - a hit returns immediately, with nothing
+    for a progress stream to report."""
     existing = (
         db.query(StudyNote)
         .filter(StudyNote.grade == grade, StudyNote.subject == subject, StudyNote.unit == unit)
@@ -455,7 +477,7 @@ def get_or_create_note(db, llm, tb_store, grade: int, subject: str, unit: str) -
     if existing is not None:
         return existing
 
-    result = generate_note(db, llm, tb_store, grade, subject, unit)
+    result = generate_note(db, llm, tb_store, grade, subject, unit, on_stage=on_stage)
     if not result["resolved"]:
         return None
     row = StudyNote(
