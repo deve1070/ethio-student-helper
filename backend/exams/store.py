@@ -1234,33 +1234,75 @@ def diagnostic_questions(db, subject: str, count: int = 15, stream: str | None =
     topic group (best_unit, falling back to skill_strand, falling back to "uncategorized") in stable
     sorted order, cycling until `count` is reached or every eligible question has been used. Never
     excludes previously-attempted questions - this is a rough baseline, not a bias-controlled instrument,
-    and over-engineering that guarantee isn't worth it for a once-in-a-while check."""
-    papers_q = db.query(EsslcePaper).filter(EsslcePaper.subject == subject)
-    if stream:
-        papers_q = papers_q.filter(EsslcePaper.stream == stream)
-    groups: dict = {}
-    for paper in papers_q.all():
-        for q in paper.questions:
-            if not eligible(q):
-                continue
-            unit_info = best_unit(q)
-            key = f"unit:{unit_info[0]}:{unit_info[1]}" if unit_info else None
-            if key is None:
-                strand = skill_strand(q)
-                key = f"skill:{strand}" if strand else "uncategorized"
-            groups.setdefault(key, []).append(q)
+    and over-engineering that guarantee isn't worth it for a once-in-a-while check.
 
-    picked: list = []
+    The grouping pass below only ever needs a question's id plus the handful of fields best_unit()/
+    skill_strand() read (topic links, passage_id, part, section) - not full EsslceQuestion ORM
+    objects (stem/options/explanation/verification_code and all), same reason as eligible_units()/
+    eligible_skill_strands() above. Only the final `count`-sized selection is fetched as real rows,
+    since that's the only part that actually needs to be rendered to a student."""
+    light_q = (
+        db.query(
+            EsslceQuestion.id,
+            EsslceQuestion.passage_id,
+            EsslceQuestion.part,
+            EsslceQuestion.section,
+        )
+        .join(EsslcePaper, EsslceQuestion.paper_id == EsslcePaper.id)
+        .filter(EsslcePaper.subject == subject, eligible_filter())
+    )
+    if stream:
+        light_q = light_q.filter(EsslcePaper.stream == stream)
+    light_rows = light_q.order_by(EsslceQuestion.id).all()
+    if not light_rows:
+        return []
+
+    links_by_qid: dict[int, list] = {}
+    if subject not in ESSLCE_SKILL_STRAND_SUBJECTS:
+        qids = [r.id for r in light_rows]
+        for qid, grade, unit, verified, score, rank in (
+            db.query(
+                EsslceTopicLink.question_id,
+                EsslceTopicLink.grade,
+                EsslceTopicLink.unit,
+                EsslceTopicLink.verified,
+                EsslceTopicLink.score,
+                EsslceTopicLink.rank,
+            )
+            .filter(EsslceTopicLink.question_id.in_(qids))
+            .all()
+        ):
+            links_by_qid.setdefault(qid, []).append(
+                SimpleNamespace(grade=grade, unit=unit, verified=verified, score=score, rank=rank)
+            )
+
+    groups: dict = {}
+    for r in light_rows:
+        unit_info = None
+        links = links_by_qid.get(r.id)
+        if links:
+            links.sort(key=lambda l: (not l.verified, l.score if l.score is not None else 9.0, l.rank))
+            if links[0].unit:
+                unit_info = (links[0].grade, links[0].unit)
+        key = f"unit:{unit_info[0]}:{unit_info[1]}" if unit_info else None
+        if key is None:
+            strand = skill_strand(SimpleNamespace(passage_id=r.passage_id, part=r.part, section=r.section))
+            key = f"skill:{strand}" if strand else "uncategorized"
+        groups.setdefault(key, []).append(r.id)
+
+    picked_ids: list = []
     group_keys = sorted(groups)
     cursors = {k: 0 for k in group_keys}
-    while len(picked) < count and any(cursors[k] < len(groups[k]) for k in group_keys):
+    while len(picked_ids) < count and any(cursors[k] < len(groups[k]) for k in group_keys):
         for k in group_keys:
             if cursors[k] < len(groups[k]):
-                picked.append(groups[k][cursors[k]])
+                picked_ids.append(groups[k][cursors[k]])
                 cursors[k] += 1
-                if len(picked) >= count:
+                if len(picked_ids) >= count:
                     break
-    return picked
+
+    by_id = {q.id: q for q in db.query(EsslceQuestion).filter(EsslceQuestion.id.in_(picked_ids)).all()}
+    return [by_id[i] for i in picked_ids if i in by_id]
 
 
 def eligible_units(db, subject: str) -> list:
