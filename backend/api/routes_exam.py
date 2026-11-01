@@ -160,9 +160,13 @@ def solve(
             credits_charged=0,
         )
 
-    if result.get("verification_status") == "ERROR":
-        # The checker could not run (rate limit / network). An unchecked answer is not cached
-        # as the canonical one, and the student is not charged for it.
+    if result.get("verification_status") in ("ERROR", "FAIL"):
+        # ERROR: the checker could not run (rate limit / network) - nothing is known either
+        # way. FAIL: the checker DID run and found the draft unsupported, and re-research
+        # already used up its retries (agents/workflow.py's MAX_RESEARCH_ATTEMPTS) without
+        # fixing it - previously this fell through to the exact same caching/charging path
+        # as a passed answer despite being self-flagged as unsupported. Neither is cached as
+        # the canonical answer, and the student is not charged for either.
         db.commit()
         return ExamSolveResponse(
             exam_question_id=None,

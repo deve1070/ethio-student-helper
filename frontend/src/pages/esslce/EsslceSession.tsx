@@ -192,6 +192,9 @@ export function EsslceSessionPage() {
                 className="rounded-lg border border-zinc-100"
               />
             )}
+            <p className="text-xs font-medium text-zinc-400">
+              {current.year_ec} E.C.{current.booklet_code ? ` · Booklet ${current.booklet_code}` : ""}
+            </p>
             <p className="text-[17px] leading-relaxed text-zinc-900">
               <span className="mr-1.5 text-zinc-400">{current.item_no}.</span>
               <RichText text={current.stem} />

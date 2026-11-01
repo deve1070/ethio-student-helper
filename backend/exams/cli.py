@@ -1,6 +1,6 @@
 """Command line for the national exam (ESSLCE) bank. Run from backend/ with the venv active.
 
-  python -m exams.cli create-tables
+  alembic upgrade head                                                  # creates/updates these tables
   python -m exams.cli extract "English 2016 ESSLCE.pdf" --subject english --year-ec 2016 \\
         --first-printed-page 2 --expected 4-100 --vision-model <a Groq vision model id> --out exams_out
   python -m exams.cli load exams_out/english_2016                       # into the exam tables (separate from practice)
@@ -49,7 +49,6 @@ def _paper_args(p):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("create-tables")
     sub.add_parser("status")
 
     e = sub.add_parser("extract")
@@ -125,20 +124,10 @@ def main(argv=None):
 
     from db.session import SessionLocal
     from . import store
-    from .models import Base
 
     db = SessionLocal()
     try:
-        if args.cmd == "create-tables":
-            from .models import (
-                EsslceAttempt, EsslceElaboration, EsslcePaper, EsslcePassage, EsslceQuestion, EsslceTopicLink,
-            )
-            Base.metadata.create_all(db.get_bind(), tables=[EsslcePaper.__table__, EsslcePassage.__table__,
-                                                           EsslceQuestion.__table__, EsslceTopicLink.__table__,
-                                                           EsslceAttempt.__table__, EsslceElaboration.__table__])
-            print("national exam tables ready (esslce_papers, esslce_passages, esslce_questions, esslce_topic_links, "
-                  "esslce_attempts, esslce_elaborations)")
-        elif args.cmd == "status":
+        if args.cmd == "status":
             for r in store.status_rows(db):
                 print(r)
         elif args.cmd == "stats":
@@ -176,8 +165,14 @@ def main(argv=None):
                     store.link_topics(db, paper, tb)
                 elif args.cmd == "solve":
                     from llm.client import LLMClient
+                    from llm.gemini_client import GeminiLLMClient
                     grades = [int(g) for g in args.grades.split(",")]
-                    store.solve_paper(db, paper, LLMClient(temperature=0, max_tokens=600), tb, grades)
+                    store.solve_paper(
+                        db, paper,
+                        LLMClient(temperature=0, max_tokens=600),
+                        GeminiLLMClient(temperature=0, max_tokens=600),
+                        tb, grades,
+                    )
                     # link always rides along with solve now (same tb connection already open, same
                     # grades) - a paper can no longer end up solved-but-unlinked just because a second,
                     # separate CLI command was forgotten (confirmed: happened to chemistry_2016 and SAT_2018)

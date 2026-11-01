@@ -86,6 +86,8 @@ stub("payments.entitlement", require_credits=require_credits)
 
 
 class FakeBuilder:
+    embeddings = None
+
     def build_textbook_retriever(self, grade, subject):
         return types.SimpleNamespace(invoke=lambda q: [], grade=grade, subject=subject)
 
@@ -242,6 +244,24 @@ assert (
 calls = state["pipeline_calls"]
 solve(q="Define ion?")
 assert state["pipeline_calls"] == calls + 1  # not cached
+# 5b) the checker DID run and flagged the draft as unsupported (re-research already used up its
+# retries) - must be treated the same as ERROR above, not silently cached/charged as a normal pass.
+state["next"] = dict(
+    GOOD,
+    draft_answer="An atom with a charge.\n\n> Note: some details could not be confirmed...",
+    verification_status="FAIL",
+)
+r = solve(q="Define cation?")
+b = r.json()
+assert (
+    b["source"] == "unverified"
+    and b["exam_question_id"] is None
+    and b["credits_charged"] == 0
+    and ledger() == 1
+), b
+calls = state["pipeline_calls"]
+solve(q="Define cation?")
+assert state["pipeline_calls"] == calls + 1  # not cached either
 # 6) AI service down -> 503, nothing charged or cached
 state["next"] = LLMUnavailableError("rate limit")
 r = solve(q="Another question about atoms?")
