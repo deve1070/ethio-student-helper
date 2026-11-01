@@ -4,6 +4,7 @@ import { Button } from "../ui/Button"
 import { Card } from "../ui/Card"
 import { Spinner } from "../ui/Primitives"
 import { errorMessage, esslce } from "../../lib/api"
+import { useDelayedStatus } from "../../lib/useDelayedStatus"
 
 interface Message {
   role: "user" | "assistant"
@@ -17,6 +18,7 @@ export function AskChatPanel({ questionId }: { questionId: number }) {
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
+  const thinkingLabel = useDelayedStatus(sending, "Thinking...", "Still working on it...")
 
   async function send() {
     const text = draft.trim()
@@ -80,7 +82,7 @@ export function AskChatPanel({ questionId }: { questionId: number }) {
         ))}
         {sending && (
           <div className="self-start flex items-center gap-2 rounded-xl bg-zinc-100 px-3 py-2 text-sm text-zinc-500">
-            <Spinner className="size-4" /> Thinking...
+            <Spinner className="size-4" /> {thinkingLabel}
           </div>
         )}
       </div>

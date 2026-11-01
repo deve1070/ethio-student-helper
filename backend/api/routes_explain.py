@@ -3,11 +3,13 @@ from config import constants
 from db.models import Textbook
 from db.session import SessionLocal
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from llm.client import LLMClient
 from llm.retry import LLMUnavailableError
 from pydantic import BaseModel, Field
 from retriever.builder import RetrieverBuilder
 from retriever.decompose import DecomposingRetriever
+from utils.sse import format_sse_event
 from utils.subjects import resolve_subject
 
 router = APIRouter(prefix="/v1", tags=["explain"])
@@ -42,14 +44,36 @@ class Citation(BaseModel):
     page: str | None = None
 
 
-class ExplainResponse(BaseModel):
-    answer: str
-    citations: list[Citation]
-    credits_charged: int = 0
+def _explain_events(question: str, retriever):
+    """Generator of SSE-formatted strings for the /explain stream below. Validation
+    (grade/subject) already happened in explain() before this starts, since those are
+    plain HTTP 400s - once streaming starts, the response is already HTTP 200, so any
+    error from here on (LLM unavailable, no answer) has to travel as a final
+    {"done": true, "error": ...} event instead of an HTTP error status."""
+    try:
+        for item in _workflow.stream_full_pipeline(question=question, retriever=retriever):
+            if isinstance(item, str):
+                yield format_sse_event({"stage": item})
+                continue
+            result = item
+            if not result.get("draft_answer"):
+                yield format_sse_event({"done": True, "error": "Could not generate an answer for this question."})
+                return
+            yield format_sse_event({
+                "done": True,
+                "answer": result["draft_answer"],
+                "citations": [Citation(**c).model_dump() for c in result.get("citations", [])],
+                "credits_charged": 0,
+            })
+    except LLMUnavailableError:
+        yield format_sse_event({
+            "done": True,
+            "error": "The AI service is busy or unreachable right now. Please try again in a minute.",
+        })
 
 
-@router.post("/explain", response_model=ExplainResponse)
-def explain(request: ExplainRequest) -> ExplainResponse:
+@router.post("/explain")
+def explain(request: ExplainRequest) -> StreamingResponse:
     if request.grade not in constants.SUPPORTED_GRADES:
         raise HTTPException(
             status_code=400, detail=f"Unsupported grade: {request.grade}"
@@ -73,22 +97,6 @@ def explain(request: ExplainRequest) -> ExplainResponse:
     retriever = DecomposingRetriever(
         retriever, _planner_llm
     )  # broad questions -> several searches
-    try:
-        result = _workflow.full_pipeline(question=request.question, retriever=retriever)
-    except LLMUnavailableError as e:
-        # Not a "no match": the AI service was busy or unreachable. No credits charged.
-        raise HTTPException(
-            status_code=503,
-            detail="The AI service is busy or unreachable right now. Please try again in a minute.",
-        ) from e
-
-    if not result.get("draft_answer"):
-        raise HTTPException(
-            status_code=422, detail="Could not generate an answer for this question."
-        )
-
-    return ExplainResponse(
-        answer=result["draft_answer"],
-        citations=[Citation(**c) for c in result.get("citations", [])],
-        credits_charged=0,  # explain mode is free in the initial pricing model
+    return StreamingResponse(
+        _explain_events(request.question, retriever), media_type="text/event-stream"
     )

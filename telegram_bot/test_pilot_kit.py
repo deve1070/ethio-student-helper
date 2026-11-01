@@ -324,10 +324,12 @@ class Msg:
 
 
 def upd(uid=40, chat=400):
+    msg = Msg()
     return types.SimpleNamespace(
         effective_user=types.SimpleNamespace(id=uid),
         effective_chat=types.SimpleNamespace(id=chat),
-        message=Msg(),
+        message=msg,
+        effective_message=msg,  # matches real telegram.Update.effective_message for a message update
     )
 
 

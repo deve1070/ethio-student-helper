@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { ArrowLeft, BookMarked, Lightbulb, Sigma } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
-import { ErrorBanner, FullPageSpinner } from "../../components/ui/Primitives"
+import { ErrorBanner, Spinner } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
 import { errorMessage, notes, type StudyNote, type StudyNoteSection } from "../../lib/api"
 
@@ -40,13 +40,15 @@ export function NotesDetailPage() {
   const { gradeLevel } = useAuth()
   const navigate = useNavigate()
   const [note, setNote] = useState<StudyNote | null>(null)
+  const [stage, setStage] = useState("Getting your notes ready...")
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setNote(null)
     setError(null)
+    setStage("Getting your notes ready...")
     notes
-      .note(gradeLevel, subject, unit)
+      .note(gradeLevel, subject, unit, setStage)
       .then(setNote)
       .catch((e) => setError(errorMessage(e)))
   }, [gradeLevel, subject, unit])
@@ -62,7 +64,12 @@ export function NotesDetailPage() {
       <h2 className="-mt-2 text-xl font-semibold text-zinc-900">{unit}</h2>
 
       {error && <ErrorBanner message={error} />}
-      {!note && !error && <FullPageSpinner />}
+      {!note && !error && (
+        <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-sm text-zinc-500">
+          <Spinner />
+          {stage}
+        </div>
+      )}
 
       {note && (
         <>

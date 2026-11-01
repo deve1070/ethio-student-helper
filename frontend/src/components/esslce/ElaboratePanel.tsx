@@ -4,11 +4,13 @@ import { Button } from "../ui/Button"
 import { Card } from "../ui/Card"
 import { Spinner } from "../ui/Primitives"
 import { errorMessage, esslce, type EsslceElaboration } from "../../lib/api"
+import { useDelayedStatus } from "../../lib/useDelayedStatus"
 
 export function ElaboratePanel({ questionId }: { questionId: number }) {
   const [state, setState] = useState<"idle" | "loading" | "error" | "done">("idle")
   const [data, setData] = useState<EsslceElaboration | null>(null)
   const [error, setError] = useState("")
+  const loadingLabel = useDelayedStatus(state === "loading", "Working it out...", "Still working on it...")
 
   async function load() {
     setState("loading")
@@ -37,7 +39,7 @@ export function ElaboratePanel({ questionId }: { questionId: number }) {
       </p>
       {state === "loading" && (
         <div className="flex items-center gap-2 text-sm text-zinc-500">
-          <Spinner /> Working it out...
+          <Spinner /> {loadingLabel}
         </div>
       )}
       {state === "error" && <p className="text-sm text-red-600">{error}</p>}

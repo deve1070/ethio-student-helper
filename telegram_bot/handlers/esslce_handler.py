@@ -3,6 +3,7 @@ import base64
 import io
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ChatAction
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
@@ -37,14 +38,17 @@ def friendly_esslce_error(e: BackendError) -> str:
 
 
 async def esslce_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # effective_message, not message: also called from bot.py's menu_callback with a
+    # CallbackQuery-type Update (no .message of its own) when the main menu's ESSLCE button
+    # is tapped.
     user_id = update.effective_user.id
     if not api_client.is_logged_in(user_id):
-        await update.message.reply_text(LOGIN_FIRST)
+        await update.effective_message.reply_text(LOGIN_FIRST)
         return
     session = EsslceSession(api_client, user_id)
     context.user_data[SESSION_KEY] = session
     screen = session.start()
-    await update.message.reply_text(screen.text, reply_markup=keyboard(screen))
+    await update.effective_message.reply_text(screen.text, reply_markup=keyboard(screen))
 
 
 async def _show(query, screen) -> None:
@@ -79,6 +83,11 @@ async def esslce_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         or not api_client.is_logged_in(update.effective_user.id)
     ):
         return
+    # esslce_ask (api_client.py) is always a fresh LLM call, never cached - the slowest call this
+    # handler makes, so it's the one most worth a "something's happening" signal (explain_handler.py
+    # and exam_handler.py already do this; this was the one slow-call pair missing it).
+    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+    await update.message.reply_text("Thinking...")
     try:
         screen = await asyncio.to_thread(session.on_chat_message, update.message.text)
     except BackendError as e:
@@ -100,6 +109,16 @@ async def esslce_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "This menu has expired. Send /esslce to start again.", show_alert=True
         )
         return
+    if query.data.startswith("ee|"):
+        # on_elaborate (esslce_flow.py) is always a fresh LLM call, same as esslce_ask above -
+        # same "something's happening" signal, done as an edit of the tapped message itself
+        # rather than a new reply (matching how practice_callback/esslce_callback already only
+        # ever edit the one message in place, never append a second one for a button tap).
+        await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+        try:
+            await query.edit_message_text("Working it out...")
+        except BadRequest:
+            pass
     try:
         screen = await asyncio.to_thread(session.handle, query.data)
     except FlowError as e:

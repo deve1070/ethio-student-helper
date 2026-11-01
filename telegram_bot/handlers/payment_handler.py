@@ -14,6 +14,7 @@ chat the moment a receipt needs review (backend/payments/admin_notify.py) - both
 payment_review_callback below.
 """
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from telegram_bot import api_client
@@ -31,37 +32,9 @@ TELEBIRR_NUMBER = "0909575318"
 CBE_ACCOUNT_NUMBER = "1000198942948"
 
 
-async def credits_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    telegram_user_id = update.effective_user.id
-    if not api_client.is_logged_in(telegram_user_id):
-        await update.message.reply_text("Please /login first with your phone/email and password.")
-        return
-
-    try:
-        data = api_client.get_credits(telegram_user_id)
-    except BackendError:
-        await update.message.reply_text("Couldn't check your balance right now — try again shortly.")
-        return
-
-    if data["has_active_subscription"]:
-        await update.message.reply_text("You have an active subscription — unlimited exam solves.")
-    else:
-        await update.message.reply_text(f"You have {data['balance']} credit(s) remaining.\n\n{BUNDLES_HELP}")
-
-
-async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    telegram_user_id = update.effective_user.id
-    if not api_client.is_logged_in(telegram_user_id):
-        await update.message.reply_text("Please /login first with your phone/email and password.")
-        return
-
-    if not context.args or context.args[0] not in BUNDLE_AMOUNTS_ETB:
-        await update.message.reply_text("Usage: /buy <bundle>\n\n" + BUNDLES_HELP)
-        return
-
-    bundle = context.args[0]
+def _buy_instructions(bundle: str) -> str:
     amount = BUNDLE_AMOUNTS_ETB[bundle]
-    await update.message.reply_text(
+    return (
         f"To buy {bundle}:\n"
         f"1. Send {amount:.0f} ETB to either:\n"
         f"   • Telebirr: {TELEBIRR_NUMBER}\n"
@@ -71,6 +44,64 @@ async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "Most receipts are verified automatically within seconds; if the photo isn't clear "
         "enough to read, an admin will check it manually instead."
     )
+
+
+def _bundle_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"{bundle} ({BUNDLE_AMOUNTS_ETB[bundle]:.0f} ETB)", callback_data=f"by|{bundle}")]
+        for bundle in BUNDLE_AMOUNTS_ETB
+    ])
+
+
+async def credits_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # effective_message, not message: also called from bot.py's menu_callback with a
+    # CallbackQuery-type Update when the main menu's My Credits button is tapped.
+    telegram_user_id = update.effective_user.id
+    if not api_client.is_logged_in(telegram_user_id):
+        await update.effective_message.reply_text("Please /login first with your phone/email and password.")
+        return
+
+    try:
+        data = api_client.get_credits(telegram_user_id)
+    except BackendError:
+        await update.effective_message.reply_text("Couldn't check your balance right now — try again shortly.")
+        return
+
+    if data["has_active_subscription"]:
+        await update.effective_message.reply_text("You have an active subscription — unlimited exam solves.")
+    else:
+        await update.effective_message.reply_text(f"You have {data['balance']} credit(s) remaining.\n\n{BUNDLES_HELP}")
+
+
+async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # effective_message, not message: also called from bot.py's menu_callback (the main menu's
+    # Buy Credits button), which never carries typed args - that always falls into the button-
+    # picker branch below, same as typing bare /buy.
+    telegram_user_id = update.effective_user.id
+    if not api_client.is_logged_in(telegram_user_id):
+        await update.effective_message.reply_text("Please /login first with your phone/email and password.")
+        return
+
+    args = context.args or []
+    if not args or args[0] not in BUNDLE_AMOUNTS_ETB:
+        await update.effective_message.reply_text(
+            f"Pick a bundle:\n\n{BUNDLES_HELP}", reply_markup=_bundle_keyboard()
+        )
+        return
+
+    await update.effective_message.reply_text(_buy_instructions(args[0]))
+
+
+async def buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The bundle buttons buy_command shows when typed with no args (or tapped from the main menu)."""
+    query = update.callback_query
+    await query.answer()
+    bundle = query.data.split("|", 1)[1]
+    try:
+        await query.edit_message_text(_buy_instructions(bundle))
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            raise
 
 
 async def receipt_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

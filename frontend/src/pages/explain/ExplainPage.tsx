@@ -14,6 +14,7 @@ export function ExplainPage() {
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
   const [question, setQuestion] = useState("")
   const [loading, setLoading] = useState(false)
+  const [stage, setStage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ answer: string; citations: Citation[] } | null>(null)
 
@@ -28,14 +29,16 @@ export function ExplainPage() {
     e.preventDefault()
     setError(null)
     setResult(null)
+    setStage("Finding the answer in your textbooks...")
     setLoading(true)
     try {
-      const res = await explain.ask(gradeLevel, subject, question)
+      const res = await explain.ask(gradeLevel, subject, question, setStage)
       setResult(res)
     } catch (err) {
       setError(errorMessage(err))
     } finally {
       setLoading(false)
+      setStage(null)
     }
   }
 
@@ -100,7 +103,7 @@ export function ExplainPage() {
 
       {loading && (
         <Card className="flex items-center gap-3 p-4 text-sm text-zinc-500">
-          <Spinner /> Finding the answer in your textbooks...
+          <Spinner /> {stage}
         </Card>
       )}
 

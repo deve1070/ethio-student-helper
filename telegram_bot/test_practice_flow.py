@@ -375,7 +375,8 @@ H.api_client = fake = FakeClient([[make_question(i) for i in range(5)], []])
 
 # not logged in -> asked to log in, nothing else
 fake.logged_in = False
-upd = types.SimpleNamespace(effective_user=types.SimpleNamespace(id=7), message=Msg())
+_msg = Msg()
+upd = types.SimpleNamespace(effective_user=types.SimpleNamespace(id=7), message=_msg, effective_message=_msg)
 c = ctx()
 run(H.practice_command(upd, c))
 assert upd.message.sent[0][0] == H.LOGIN_FIRST and H.SESSION_KEY not in c.user_data
