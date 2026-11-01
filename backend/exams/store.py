@@ -3,6 +3,7 @@ reviewed before the next one runs:  load -> key/solve -> approve -> link -> inde
 Nothing here guesses an answer."""
 
 import ast
+import functools
 import json
 import re
 import subprocess
@@ -1007,6 +1008,13 @@ def paper_complete(paper: EsslcePaper) -> bool:
     )
 
 
+def _diagram_photo_path(q: EsslceQuestion) -> str | None:
+    paper = q.paper
+    if not paper or not paper.source_dir or not q.printed_page:
+        return None
+    return f"{paper.source_dir}/p{q.printed_page:02d}.jpg"
+
+
 def question_page_image(q: EsslceQuestion) -> bytes | None:
     """The real source photo of this question's printed page, for the (rare) item that genuinely needs a
     figure/table/diagram the vision model couldn't transcribe as text. Always the literal page photo
@@ -1014,12 +1022,30 @@ def question_page_image(q: EsslceQuestion) -> bytes | None:
     recreation of a real exam figure. None if the paper predates `source_dir` being recorded, or the
     expected file is missing (never guessed, never a broken reference shown to a student). Reads from
     Supabase Storage in production, local disk in dev (storage.download's own fallback) - same relative
-    path either way, so no DB schema change was needed for the move."""
-    paper = q.paper
-    if not paper or not paper.source_dir or not q.printed_page:
+    path either way, so no DB schema change was needed for the move. Always fetches fresh (never cached) -
+    unlike _diagram_image_exists below, a caller here wants the actual current bytes to display."""
+    path = _diagram_photo_path(q)
+    if path is None:
         return None
-    path = f"{paper.source_dir}/p{q.printed_page:02d}.jpg"
     return storage.download("exam-pages", path)
+
+
+@functools.lru_cache(maxsize=2048)
+def _diagram_image_exists(storage_path: str) -> bool:
+    """Cached, crash-safe existence check for eligible() below, which runs this for every
+    has_diagram question on every /subjects and /papers listing request - a real network call
+    to Supabase Storage per question, every time, with no cache, was confirmed live in production
+    to intermittently throw (a transient Storage timeout/connection error, uncaught) and crash the
+    whole listing request with a 500 - and because this project runs a single worker process,
+    that one crash blocked every OTHER concurrent request too, surfacing as unrelated-looking 502s.
+    A photo's existence never changes once uploaded, so this caches True/False indefinitely per
+    worker process; a failed check returns False (not eligible) rather than raising, since a
+    flaky storage call must never crash the caller - the question simply won't count as eligible
+    until the next successful check, which is a far smaller problem than taking down the service."""
+    try:
+        return storage.download("exam-pages", storage_path) is not None
+    except Exception:  # noqa: BLE001 - any failure here must degrade, never crash the caller
+        return False
 
 
 def eligible(q: EsslceQuestion) -> bool:
@@ -1029,7 +1055,8 @@ def eligible(q: EsslceQuestion) -> bool:
         return False
     if not q.has_diagram:
         return True
-    return question_page_image(q) is not None
+    path = _diagram_photo_path(q)
+    return path is not None and _diagram_image_exists(path)
 
 
 def best_unit(q: EsslceQuestion):
