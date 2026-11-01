@@ -39,15 +39,21 @@ def upload(bucket: str, path: str, data: bytes, content_type: str = "image/jpeg"
     resp.raise_for_status()
 
 
-def download(bucket: str, path: str) -> bytes | None:
+def download(bucket: str, path: str, timeout: float = 30) -> bytes | None:
     """None on any miss (not configured and no local file, or a real 404) - never a broken reference
-    shown to a student, matching question_page_image's existing never-guess contract."""
+    shown to a student, matching question_page_image's existing never-guess contract.
+
+    timeout defaults to a generous 30s (a student is waiting on this one specific photo), but a
+    caller checking EXISTENCE for many questions at once (exams/store.py's _diagram_image_exists)
+    should pass something much shorter - confirmed live that a slow/unreachable Storage call
+    blocking the full 30s, once per question, in a single-worker deployment, takes the whole
+    service down for everyone else for minutes while one listing request waits its way through."""
     if not _configured():
         local = Path(path)
         return local.read_bytes() if local.is_file() else None
     url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
     resp = httpx.get(
-        url, headers={"Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}"}, timeout=30
+        url, headers={"Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}"}, timeout=timeout
     )
     if resp.status_code == 404:
         return None
