@@ -60,6 +60,9 @@ def _fresh_textbook_store():
 class EsslceQuestionOut(BaseModel):
     id: int
     item_no: int
+    year_ec: int  # which exam this question is from, alongside item_no - needed once
+    # questions from several years are pooled together (e.g. "practice by unit")
+    booklet_code: str | None = None  # which printed/shuffled copy, when the source paper has one
     stem: str
     options: list[str]
     passage_text: str | None = None
@@ -166,6 +169,8 @@ class ProgressResponse(BaseModel):
 class MistakeItem(BaseModel):
     question_id: int
     item_no: int
+    year_ec: int
+    booklet_code: str | None = None
     stem: str
     options: list[str]
     passage_text: str | None = None  # a Reading Comprehension item's passage - must always precede the stem
@@ -232,6 +237,8 @@ def mistakes(
             MistakeItem(
                 question_id=q.id,
                 item_no=q.item_no,
+                year_ec=q.paper.year_ec,
+                booklet_code=q.paper.booklet_code,
                 stem=q.stem,
                 options=list(q.options or []),
                 passage_text=passage.text if passage else None,
@@ -291,6 +298,8 @@ def _build_outputs(db: Session, questions: list[EsslceQuestion]) -> list[EsslceQ
             EsslceQuestionOut(
                 id=q.id,
                 item_no=q.item_no,
+                year_ec=q.paper.year_ec,
+                booklet_code=q.paper.booklet_code,
                 stem=q.stem,
                 options=list(q.options or []),
                 passage_text=passage.text if passage else None,

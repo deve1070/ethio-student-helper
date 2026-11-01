@@ -13,10 +13,14 @@ confirmed directly against a local pgvector instance: PGVector supports the exac
 {"$eq": ...} form - so no caller's query logic needs to change, only its construction line.
 """
 
+import json
+import time
+
 import psycopg
 from langchain_postgres import PGVector
 
 from config.settings import settings
+from utils.logging import logger
 
 
 def get_vector_store(collection_name: str, embedding_function):
@@ -54,3 +58,52 @@ def collection_count(collection_name: str) -> int:
         )
         row = cur.fetchone()
         return row[0] if row else 0
+
+
+def fetch_collection_rows(collection_name: str, batch_size: int = 500):
+    """Yield (id, document, metadata) for every row of one collection, straight from
+    langchain_postgres's own tables. Used by scripts/reembed_vectors.py to re-embed a
+    collection's existing text with a new embedding model/input shape, without needing
+    the original source (PDFs, exam extraction) again."""
+    dsn = settings.VECTOR_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://", 1)
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT e.id, e.document, e.cmetadata FROM langchain_pg_embedding e "
+            "JOIN langchain_pg_collection c ON c.uuid = e.collection_id "
+            "WHERE c.name = %s ORDER BY e.id",
+            (collection_name,),
+        )
+        while True:
+            rows = cur.fetchmany(batch_size)
+            if not rows:
+                break
+            for row_id, document, cmetadata in rows:
+                if isinstance(cmetadata, str):  # defensive: psycopg normally loads jsonb as dict already
+                    cmetadata = json.loads(cmetadata)
+                yield row_id, document, cmetadata or {}
+
+
+def add_in_batches(vector_store, texts, metadatas, ids, batch_size=50, retries=4, pace_seconds=0.0):
+    """Embed + store in small batches, retrying on rate-limit/transient errors (a whole
+    book, or a whole collection, in one call can exceed free-tier embedding quotas).
+    pace_seconds, if set, sleeps that long after each successful batch - a fixed-rate
+    throttle on top of the reactive per-batch retry below, for a provider whose free-tier
+    RPM is low enough that firing batches back-to-back trips it on nearly every call
+    (confirmed against Gemini's embedding free tier: reactive backoff alone spent most of
+    its time retrying rather than progressing). Shared by ingestion/textbook_ingest.py and
+    scripts/reembed_vectors.py."""
+    for i in range(0, len(texts), batch_size):
+        sl = slice(i, i + batch_size)
+        for attempt in range(1, retries + 1):
+            try:
+                vector_store.add_texts(texts=texts[sl], metadatas=metadatas[sl], ids=ids[sl])
+                break
+            except Exception as e:
+                if attempt == retries:
+                    raise
+                wait = 10 * attempt
+                logger.warning(f"Batch {i}-{i + batch_size} failed ({e}); retrying in {wait}s")
+                time.sleep(wait)
+        logger.info(f"  embedded {min(i + batch_size, len(texts))}/{len(texts)} items")
+        if pace_seconds:
+            time.sleep(pace_seconds)

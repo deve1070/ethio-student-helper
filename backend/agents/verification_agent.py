@@ -3,7 +3,7 @@ import logging
 
 from langchain.schema import Document
 
-from llm.client import LLMClient
+from llm.gemini_client import GeminiLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +30,15 @@ class VerificationAgent:
         """
         Fact-checks a draft answer against the retrieved textbook chunks.
 
-        max_tokens is generous on purpose: the Groq model is a reasoning
-        model and its hidden reasoning counts against this budget. A small
-        value produces an empty reply, which used to be treated as a failed
-        verification.
+        Deliberately a DIFFERENT model than the one that drafted the answer
+        (ResearchAgent, llm/client.py's Groq-backed LLMClient): a verifier
+        from the same model family as the author tends to share its blind
+        spots, so this is Gemini (llm/gemini_client.py) - the same
+        cross-model cross-check this project now applies to exam-answer
+        resolution (exams/store.py's solve_question_crosschecked).
         """
-        logger.info("Initializing VerificationAgent with Groq LLM client...")
-        self.model = LLMClient(temperature=0, max_tokens=1000)
+        logger.info("Initializing VerificationAgent with a Gemini LLM client...")
+        self.model = GeminiLLMClient(temperature=0, max_tokens=1000)
 
     def generate_prompt(self, answer: str, context: str, question: str | None) -> str:
         question_block = f"QUESTION:\n{question}\n\n" if question else ""

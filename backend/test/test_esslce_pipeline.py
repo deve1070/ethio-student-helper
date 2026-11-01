@@ -284,11 +284,41 @@ db.commit()
 
 always_two = FakeLLM(json.dumps({"answer_index": 2, "source_index": 0,
     "explanation": "matches the passage", "supporting_quote": "Neon is a noble gas"}))
-res = ST.solve_paper(db, sp, always_two, tb1, grades=(9,), log=quiet)
-assert res == {"solved": 6, "unresolved": 0, "withdrawn": 1}                          # 7 - 1 manual (never touched); item 3's approval withdrawn
+# A second model that consistently picks a DIFFERENT option - disagreement, so this first pass
+# must behave exactly like the old single-model solve_paper (needs_review, no auto-approval).
+always_zero = FakeLLM(json.dumps({"answer_index": 0, "source_index": 0,
+    "explanation": "different conclusion", "supporting_quote": "Neon is a noble gas"}))
+res = ST.solve_paper(db, sp, always_two, always_zero, tb1, grades=(9,), log=quiet)
+assert res == {"solved": 6, "unresolved": 0, "withdrawn": 1, "auto_approved": 0}       # 7 - 1 manual (never touched); item 3's approval withdrawn
 assert sp.questions[1].answer_index == 3 and sp.questions[1].answer_source == "manual"  # untouched - never overwritten
 assert sp.questions[2].answer_index == 2 and sp.questions[2].review_status == "needs_review" and sp.questions[2].reviewed_by is None
+assert sp.questions[2].cross_check_status == "disagreed" and sp.questions[2].cross_check_secondary_answer == 0
 assert sp.questions[0].answer_index == 2 and sp.questions[0].answer_source == "ai_derived" and sp.questions[0].review_status == "needs_review"
+
+# ---- 6b-cross. an independent, genuinely different model's agreement auto-approves - no teacher needed
+agreeing = FakeLLM(json.dumps({"answer_index": 1, "source_index": 0,
+    "explanation": "same conclusion", "supporting_quote": "Neon is a noble gas"}))
+r = ST.solve_question_crosschecked(confident, agreeing, tb1, paper, paper.questions[0], grades=(9,))
+assert r["resolved"] and r["answer_index"] == 1 and r["cross_checked"] and r["agreement"] and "secondary_answer_index" not in r
+
+r = ST.solve_question_crosschecked(confident, always_zero, tb1, paper, paper.questions[0], grades=(9,))
+assert r["resolved"] and r["answer_index"] == 1 and r["cross_checked"] and not r["agreement"] and r["secondary_answer_index"] == 0
+
+class RaisingLLM:  # the secondary model is unreachable - never mistaken for a disagreement
+    def chat(self, messages): raise RuntimeError("secondary unavailable")
+r = ST.solve_question_crosschecked(confident, RaisingLLM(), tb1, paper, paper.questions[0], grades=(9,))
+assert r["resolved"] and r["answer_index"] == 1 and not r["cross_checked"] and not r["agreement"] and "secondary_answer_index" not in r
+
+r = ST.solve_question_crosschecked(unconfident, agreeing, tb1, paper, paper.questions[0], grades=(9,))
+assert not r["resolved"] and not r["cross_checked"]                                   # nothing to cross-check
+
+# running solve_paper AGAIN on sp, this time with an agreeing secondary: previously-withdrawn/
+# needs_review items (ai_derived, so still eligible to be re-solved) get auto-approved.
+res2 = ST.solve_paper(db, sp, always_two, always_two, tb1, grades=(9,), log=quiet)
+assert res2["auto_approved"] == 6
+assert sp.questions[0].review_status == "approved" and sp.questions[0].reviewed_by == "ai_crosscheck" and sp.questions[0].cross_check_status == "agreed"
+assert sp.questions[2].review_status == "approved" and sp.questions[2].cross_check_status == "agreed"
+assert sp.questions[1].answer_source == "manual" and sp.questions[1].reviewed_by != "ai_crosscheck"  # manual item never touched by cross-check
 
 # index_questions omits grade/unit metadata when a question has no resolved unit yet (sp was never `link`ed)
 ST.approve(db, sp, all_clean=True)
@@ -460,6 +490,7 @@ sys.modules["config.settings"] = types.SimpleNamespace(settings=types.SimpleName
 sys.modules["config"].constants = sys.modules["config.constants"]; sys.modules["config"].settings = sys.modules["config.settings"]
 sys.modules["retriever.builder"] = types.SimpleNamespace(RetrieverBuilder=lambda: types.SimpleNamespace(embeddings=None))
 sys.modules["llm.client"] = types.SimpleNamespace(LLMClient=lambda **kw: FakeLLM(json.dumps({"answer_index": -1})))
+sys.modules["llm.gemini_client"] = types.SimpleNamespace(GeminiLLMClient=lambda **kw: FakeLLM(json.dumps({"answer_index": -1})))
 def run(*argv):
     buf = io.StringIO()
     with redirect_stdout(buf): code = cli.main(list(argv))
@@ -470,7 +501,12 @@ class B(types.SimpleNamespace):
     def get_bind(self): return db2e
 real_session = S2
 sys.modules["db.session"].SessionLocal = lambda: real_session()
-code, o = run("create-tables"); assert code == 0 and "esslce_papers" in o
+# exams.cli's create-tables subcommand was removed (Alembic now owns schema
+# creation in production) - this throwaway SQLite fixture creates its own tables
+# directly, the same way line 159's engine does above.
+Base.metadata.create_all(db2e, tables=[EsslcePaper.__table__, EsslcePassage.__table__,
+                                        EsslceQuestion.__table__, EsslceTopicLink.__table__,
+                                        EsslceAttempt.__table__])
 code, o = run("extract", str(folder), "--subject", "Chemistry", "--year-ec", "2016", "--stream", "natural_science", "--expected", "1-7",
               "--vision-model", "x", "--no-ocr", "--pause", "0", "--out", str(TMP / "cli_out"))
 assert code == 0 and (TMP / "cli_out" / "chemistry_2016_natural_science" / "questions.jsonl").exists()

@@ -144,6 +144,14 @@ class EsslceQuestion(Base):
     skill_tags = Column(JSON)  # e.g. ["conditionals", "reported speech"]
     reviewed_by = Column(String(64))
     reviewed_at = Column(DateTime)
+    # Independent second-model cross-check of an ai_derived answer (exams/store.py
+    # solve_question_crosschecked) - "agreed" auto-approves (reviewed_by='ai_crosscheck')
+    # since there is no teacher to run `approve` for most of these papers; "disagreed"
+    # means the two models picked different options, so a reviewer should look here first;
+    # NULL means never cross-checked (official_key/manual answers, or an older ai_derived
+    # answer from before this existed).
+    cross_check_status = Column(String(16))  # "agreed" | "disagreed" | NULL
+    cross_check_secondary_answer = Column(Integer)  # set only when cross_check_status == "disagreed"
     paper = relationship("EsslcePaper", back_populates="questions")
     passage = relationship("EsslcePassage")
     links = relationship(

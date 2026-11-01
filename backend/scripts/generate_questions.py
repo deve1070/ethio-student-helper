@@ -90,6 +90,7 @@ def main():
     from db.models_practice import QuizQuestion
     from db.session import SessionLocal
     from llm.client import LLMClient
+    from llm.gemini_client import GeminiLLMClient
     from practice.generator import generate_for_passage
     from practice.validate import dup_key
     from retriever.builder import RetrieverBuilder
@@ -106,7 +107,11 @@ def main():
         embedding_function=RetrieverBuilder().embeddings,
     )
     gen_llm = LLMClient(temperature=0.4, max_tokens=2500)
-    solve_llm = LLMClient(temperature=0, max_tokens=800)
+    # A genuinely different model than gen_llm for the blind second opinion
+    # (practice/generator.py's blind_solve) - the same reasoning this project
+    # now applies everywhere an AI checks another AI's answer with no human
+    # backstop (see exams/store.py's solve_question_crosschecked).
+    solve_llm = GeminiLLMClient(temperature=0, max_tokens=800)
 
     progress = json.load(open(PROGRESS_FILE)) if os.path.exists(PROGRESS_FILE) else {}
     totals, rejected_total, made = Counter(), Counter(), 0

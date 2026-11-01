@@ -13,6 +13,7 @@ from pathlib import Path
 import storage
 from llm.client import parse_json_object
 from retriever.citation import citation_for
+from utils.logging import logger
 
 from .models import (
     EsslceAttempt,
@@ -590,18 +591,70 @@ def solve_question(
     }
 
 
+def solve_question_crosschecked(
+    llm_primary, llm_secondary, tb_store, paper: EsslcePaper, q: EsslceQuestion,
+    grades=(9, 10, 11, 12), k=6,
+) -> dict:
+    """solve_question, plus an independent second opinion from a DIFFERENT model
+    (llm_secondary - in practice llm/gemini_client.py's GeminiLLMClient, cross-checking
+    llm/client.py's Groq-backed LLMClient), asked blind - it never sees the primary's
+    chosen answer, quote or code, so it cannot just echo it back. The secondary call
+    goes through the exact same solve_question (or, for a calculation subject,
+    solve_question_calculation inside it) as the primary, so it has to pass the exact
+    same grounding/code-execution gate independently, not a weaker check.
+
+    Why this matters: solve_question already refuses to guess past what its own
+    evidence supports, but it is still only one model's reading of that evidence - a
+    verbatim quote can still be real but not actually entail the chosen option, and a
+    verification script can still be written to (incorrectly) confirm its own author's
+    conceptual mistake. A second, differently-trained model solving the same question
+    from scratch is far less likely to share the same blind spot.
+
+    Returns the primary's result dict (unchanged) plus:
+      cross_checked          True iff the secondary call actually ran and resolved -
+                              NOT the same as "disagreed": a secondary failure (model
+                              unreachable, rate-limited past its own retries) leaves
+                              this False, so a down/exhausted second model can never
+                              look like a disagreement.
+      agreement               True iff cross_checked and both answer_index values match.
+      secondary_answer_index  the secondary's answer, only set when it disagreed (so a
+                              reviewer sees both candidates without re-running anything).
+    Never raises: a secondary-call exception is caught and treated as cross_checked=False,
+    exactly like "the secondary couldn't be reached" rather than "the secondary disagreed."
+    """
+    primary = solve_question(llm_primary, tb_store, paper, q, grades, k)
+    if not primary["resolved"]:
+        return {**primary, "cross_checked": False, "agreement": False}
+    try:
+        secondary = solve_question(llm_secondary, tb_store, paper, q, grades, k)
+    except Exception as e:  # noqa: BLE001 - "secondary unavailable", never "secondary disagreed"
+        logger.warning(f"cross-check secondary call failed for question {q.id}: {e}")
+        return {**primary, "cross_checked": False, "agreement": False}
+    if not secondary["resolved"]:
+        return {**primary, "cross_checked": False, "agreement": False}
+    agreement = secondary["answer_index"] == primary["answer_index"]
+    out = {**primary, "cross_checked": True, "agreement": agreement}
+    if not agreement:
+        out["secondary_answer_index"] = secondary["answer_index"]
+    return out
+
+
 def solve_paper(
-    db, paper: EsslcePaper, llm, tb_store, grades=(9, 10, 11, 12), log=print
+    db, paper: EsslcePaper, llm, llm_secondary, tb_store, grades=(9, 10, 11, 12), log=print
 ) -> dict:
     """AI-proposes an answer for every question that doesn't already have a REAL answer (never overwrites
-    answer_source 'official_key' or 'manual'). Always leaves review_status at needs_review - the existing
-    `approve` step still gates every question before a student can see it. Mirrors attach_key: if an
-    already-approved question's answer changes, its approval is withdrawn."""
-    solved, unresolved_n, withdrawn = 0, 0, 0
+    answer_source 'official_key' or 'manual'), cross-checked against an independent second model
+    (solve_question_crosschecked). When both models agree, there is no teacher to ever run `approve` for
+    an AI-derived answer, so full agreement IS the approval: review_status goes straight to 'approved',
+    reviewed_by='ai_crosscheck'. Any other outcome (disagreement, or the secondary couldn't be reached)
+    falls back to exactly the old behavior - needs_review, waiting for a human `approve` - never guessed
+    into approval. Mirrors attach_key: if an already-approved question's answer changes, its approval is
+    withdrawn."""
+    solved, unresolved_n, withdrawn, auto_approved = 0, 0, 0, 0
     for q in paper.questions:
         if q.answer_source in ("official_key", "manual"):
             continue
-        result = solve_question(llm, tb_store, paper, q, grades)
+        result = solve_question_crosschecked(llm, llm_secondary, tb_store, paper, q, grades)
         if not result["resolved"]:
             unresolved_n += 1
             continue
@@ -621,15 +674,25 @@ def solve_paper(
         q.supporting_quote = result.get("supporting_quote")
         q.verification_code = result.get("verification_code")
         q.verification_output = result.get("verification_output")
-        if q.review_status in ("needs_key", "needs_review"):
+        q.cross_check_status = "agreed" if result["agreement"] else (
+            "disagreed" if result["cross_checked"] else None
+        )
+        q.cross_check_secondary_answer = result.get("secondary_answer_index")
+        if result["agreement"]:
+            q.review_status, q.reviewed_by, q.reviewed_at = "approved", "ai_crosscheck", datetime.utcnow()
+            auto_approved += 1
+        elif q.review_status in ("needs_key", "needs_review"):
             q.review_status = "needs_review"
         solved += 1
     db.commit()
     log(
-        f"solved {solved} question(s), {unresolved_n} left unresolved, "
-        f"{withdrawn} approval(s) withdrawn"
+        f"solved {solved} question(s) ({auto_approved} auto-approved by cross-check agreement), "
+        f"{unresolved_n} left unresolved, {withdrawn} approval(s) withdrawn"
     )
-    return {"solved": solved, "unresolved": unresolved_n, "withdrawn": withdrawn}
+    return {
+        "solved": solved, "unresolved": unresolved_n, "withdrawn": withdrawn,
+        "auto_approved": auto_approved,
+    }
 
 
 # ---------------------------------------------------------------------------- on-demand elaboration

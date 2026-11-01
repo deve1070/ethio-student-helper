@@ -4,6 +4,10 @@ from .constants import ALLOWED_TYPES, MAX_FILE_SIZE, MAX_TOTAL_SIZE
 
 
 class Settings(BaseSettings):
+    # "development" locally, "production" in Render's dashboard — gates the
+    # startup checks and CORS/localhost behavior in main.py.
+    ENVIRONMENT: str = "development"
+
     # Optional settings with defaults
     MAX_FILE_SIZE: int = MAX_FILE_SIZE
     MAX_TOTAL_SIZE: int = MAX_TOTAL_SIZE
@@ -52,13 +56,26 @@ class Settings(BaseSettings):
     VECTOR_SEARCH_K: int = 10
     HYBRID_RETRIEVER_WEIGHTS: list = [0.4, 0.6]
 
-    # LLM + embeddings providers — Groq for chat generation (fast, free
-    # tier), Gemini for embeddings (Groq doesn't serve embedding models).
+    # LLM providers — Groq for chat generation (fast, free tier), Gemini as a
+    # second, independent model for cross-checking Groq's own answers
+    # (llm/gemini_client.py) — a real second opinion needs a different model
+    # family, not another call to the same one.
     # Get free keys at console.groq.com and aistudio.google.com.
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "openai/gpt-oss-120b"
     GEMINI_API_KEY: str = ""
-    GEMINI_EMBEDDING_MODEL: str = "models/gemini-embedding-001"
+    GEMINI_CHAT_MODEL: str = "gemini-3.8-flash"
+
+    # Embeddings: local, via fastembed (ONNX Runtime, no torch) - NOT an API call, so no
+    # key, no rate limit, no per-request cost. Replaced Gemini's embedding API after that
+    # free tier's daily quota (1000 embed requests/day, shared across every key tried on
+    # this account/network - rotating keys did not get a fresh pool) proved unworkable for
+    # a one-time ~28,000-chunk backfill. Measured directly: loading this model costs ~280MB
+    # RSS, comfortably under Render's 512MB free tier - the earlier local embedding attempt
+    # (sentence-transformers, ~800MB RSS) was ruled out by torch's own runtime overhead, not
+    # by the model weights themselves (BAAI/bge-small-en-v1.5 is ~130MB) - fastembed avoids
+    # that overhead by running the same model through ONNX Runtime instead of torch.
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
 
     # Logging settings
     LOG_LEVEL: str = "INFO"
@@ -66,6 +83,10 @@ class Settings(BaseSettings):
     # New cache settings with type annotations
     CACHE_DIR: str = "document_cache"
     CACHE_EXPIRE_DAYS: int = 7
+
+    # Error monitoring (Sentry) — optional; main.py only initializes Sentry if this is set,
+    # so local dev needs nothing extra.
+    SENTRY_DSN: str = ""
 
     class Config:
         env_file = ".env"

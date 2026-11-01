@@ -24,7 +24,6 @@ problems in one step.
 import argparse
 import json
 import re
-import time
 import unicodedata
 import uuid
 from pathlib import Path
@@ -50,6 +49,28 @@ def normalize_subject(name: str) -> str:
     become underscores ("Information Technology" -> "information_technology"),
     so every grade ends up under the same subject name."""
     return re.sub(r"[\s\-]+", "_", name.strip().lower())
+
+
+def _subject_label(subject: str) -> str:
+    """Stored snake_case subject -> a readable label for the embedding prefix below
+    ("information_technology" -> "Information Technology")."""
+    return subject.replace("_", " ").title()
+
+
+def _embed_text(grade: int, subject: str, unit: str | None, section: str | None, text: str) -> str:
+    """The string actually embedded (and stored as the retrievable document) for one
+    textbook chunk: a short grade/subject/unit/section header ahead of the chunk's own
+    text, so the embedding itself carries the chunk's place in the book - not just side
+    metadata a filter can check after the fact. This is what lets retrieval disambiguate
+    a generically-worded chunk ("this process occurs in three stages") by which unit it
+    actually belongs to. Deliberately NOT applied to exam question embeddings
+    (exams/store.py:embed_text, exams/cache.py) - those exist to match a student's own
+    rephrasing of ONE question against its near-duplicate, and mixing in unit/paper
+    context there would pull every question of the same unit together instead."""
+    header = f"{_subject_label(subject)}, Grade {grade}"
+    if unit:
+        header += f"\n{unit}" + (f" > {section}" if section else "")
+    return f"{header}\n\n{text}"
 
 
 def _discover_files(root: Path, grades: list[int] | None = None):
@@ -291,24 +312,6 @@ def _merge_chunks(raw: list[dict], max_chars: int = MAX_CHUNK_CHARS) -> list[dic
         else:
             merged.append(dict(item))
     return merged
-
-
-def _add_in_batches(vector_store, texts, metadatas, ids, batch_size=50, retries=4):
-    """Embed + store in small batches, retrying on rate-limit/transient errors
-    (a whole book in one call can exceed free-tier embedding quotas)."""
-    for i in range(0, len(texts), batch_size):
-        sl = slice(i, i + batch_size)
-        for attempt in range(1, retries + 1):
-            try:
-                vector_store.add_texts(texts=texts[sl], metadatas=metadatas[sl], ids=ids[sl])
-                break
-            except Exception as e:
-                if attempt == retries:
-                    raise
-                wait = 10 * attempt
-                logger.warning(f"Batch {i}-{i + batch_size} failed ({e}); retrying in {wait}s")
-                time.sleep(wait)
-        logger.info(f"  embedded {min(i + batch_size, len(texts))}/{len(texts)} chunks")
 
 
 def _delete_vectors(vector_store, ids):
@@ -584,7 +587,7 @@ def ingest_all(
                         vector_id=vector_id,
                     )
                 )
-                vector_texts.append(text)
+                vector_texts.append(_embed_text(grade, subject, unit, section, text))
                 vector_metadatas.append(
                     {
                         "vector_id": vector_id,
@@ -604,7 +607,7 @@ def ingest_all(
 
             db.add_all(chunk_rows)
             try:
-                _add_in_batches(vector_store, vector_texts, vector_metadatas, vector_ids)
+                vectorstore.add_in_batches(vector_store, vector_texts, vector_metadatas, vector_ids)
                 db.commit()
             except Exception:
                 db.rollback()
