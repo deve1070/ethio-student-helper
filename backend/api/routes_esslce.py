@@ -10,14 +10,15 @@ never reimplemented, so there is exactly one definition of "safe to show a stude
 """
 
 import base64
+from types import SimpleNamespace
 
 from auth.dependencies import get_current_user
 from config import constants
-from config.constants import CALCULATION_SUBJECTS
+from config.constants import CALCULATION_SUBJECTS, ESSLCE_SKILL_STRAND_SUBJECTS
 from db.models import User
 from db.session import get_db
 from exams.latex_render import render_latex_png
-from exams.models import EsslceAttempt, EsslcePaper, EsslcePassage, EsslceQuestion
+from exams.models import EsslceAttempt, EsslcePaper, EsslcePassage, EsslceQuestion, EsslceTopicLink
 from exams.store import (
     MIN_ATTEMPTS_FOR_SIGNAL,
     ask_about_question,
@@ -458,17 +459,29 @@ def next_questions(
             )
         return NextResponse(paper_id=paper.id, questions=_build_outputs(db, rows))
 
-    papers_q = db.query(EsslcePaper).filter(EsslcePaper.subject == request.subject)
+    # Lightweight candidate query - only the columns needed to filter/select, not full
+    # EsslceQuestion ORM objects (stem/options/explanation and all). Confirmed live in
+    # production that loading every eligible question of a subject as a full row, for this -
+    # the single most frequently called endpoint in the app - took minutes or crashed the
+    # single worker outright once a subject had hundreds of eligible questions.
+    light_q = (
+        db.query(
+            EsslceQuestion.id,
+            EsslceQuestion.passage_id,
+            EsslceQuestion.part,
+            EsslceQuestion.section,
+        )
+        .join(EsslcePaper, EsslceQuestion.paper_id == EsslcePaper.id)
+        .filter(EsslcePaper.subject == request.subject, eligible_filter())
+    )
     if request.stream:
-        papers_q = papers_q.filter(EsslcePaper.stream == request.stream)
-    candidates: list[EsslceQuestion] = []
-    for paper in papers_q.all():
-        candidates.extend(q for q in paper.questions if eligible(q))
+        light_q = light_q.filter(EsslcePaper.stream == request.stream)
+    candidates = light_q.all()
     if not candidates:
         return NextResponse(paper_id=None, questions=[])
 
     # computed once, before any filter below, so incorrect_only can use it alongside unit/skill
-    ids = [q.id for q in candidates]
+    ids = [r.id for r in candidates]
     last = {}
     for qid, ok, ts in (
         db.query(EsslceAttempt.question_id, EsslceAttempt.is_correct, EsslceAttempt.created_at)
@@ -478,24 +491,61 @@ def next_questions(
         last[qid] = (ok, ts)  # ordered by time, so the latest attempt wins
 
     if request.unit is not None:
+        # best_unit() needs each candidate's topic links - same lightweight stand-in pattern as
+        # eligible_units() (exams/store.py): fetched only for the candidates actually in play,
+        # not every question of the subject.
+        links_by_qid: dict[int, list] = {}
+        if request.subject not in ESSLCE_SKILL_STRAND_SUBJECTS:
+            for qid, grade, unit, verified, score, rank in (
+                db.query(
+                    EsslceTopicLink.question_id,
+                    EsslceTopicLink.grade,
+                    EsslceTopicLink.unit,
+                    EsslceTopicLink.verified,
+                    EsslceTopicLink.score,
+                    EsslceTopicLink.rank,
+                )
+                .filter(EsslceTopicLink.question_id.in_(ids))
+                .all()
+            ):
+                links_by_qid.setdefault(qid, []).append(
+                    SimpleNamespace(grade=grade, unit=unit, verified=verified, score=score, rank=rank)
+                )
+
+        def _best_unit_light(qid: int):
+            links = links_by_qid.get(qid)
+            if not links:
+                return None
+            links.sort(key=lambda l: (not l.verified, l.score if l.score is not None else 9.0, l.rank))
+            return (links[0].grade, links[0].unit) if links[0].unit else None
+
         candidates = [
-            q
-            for q in candidates
-            if (bu := best_unit(q))
+            r
+            for r in candidates
+            if (bu := _best_unit_light(r.id))
             and bu[1] == request.unit
             and (request.grade is None or bu[0] == request.grade)
         ]
     if request.skill is not None:
-        candidates = [q for q in candidates if skill_strand(q) == request.skill]
+        candidates = [
+            r
+            for r in candidates
+            if skill_strand(SimpleNamespace(passage_id=r.passage_id, part=r.part, section=r.section))
+            == request.skill
+        ]
     if request.incorrect_only:
-        candidates = [q for q in candidates if q.id in last and not last[q.id][0]]
+        candidates = [r for r in candidates if r.id in last and not last[r.id][0]]
     if not candidates:
         return NextResponse(paper_id=None, questions=[])
 
-    by_id = {q.id: q for q in candidates}
-    picked = pick_questions([{"id": q.id} for q in candidates], last, request.count)
+    picked = pick_questions([{"id": r.id} for r in candidates], last, request.count)
+    picked_ids = [c["id"] for c in picked]
+    by_id = {
+        q.id: q
+        for q in db.query(EsslceQuestion).filter(EsslceQuestion.id.in_(picked_ids)).all()
+    }
     return NextResponse(
-        paper_id=None, questions=_build_outputs(db, [by_id[c["id"]] for c in picked])
+        paper_id=None, questions=_build_outputs(db, [by_id[i] for i in picked_ids if i in by_id])
     )
 
 
