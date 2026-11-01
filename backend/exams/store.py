@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import storage
 from llm.client import parse_json_object
@@ -1202,16 +1203,27 @@ def skill_strand(q: EsslceQuestion) -> str | None:
 
 def eligible_skill_strands(db, subject: str) -> list:
     """Skill strands with >=1 eligible question, for a student-facing picker - parallel to eligible_units(),
-    along the skill axis instead of the topic axis."""
+    along the skill axis instead of the topic axis.
+
+    Queries only the 3 columns skill_strand() actually reads (passage_id, part, section) via a
+    SQL filter (eligible_filter()), not full EsslceQuestion ORM objects - confirmed live in
+    production that materializing every question of a subject (passage/stem/options/explanation/
+    verification_code and all) just to classify it was enough to OOM-kill the single worker
+    process once a subject had hundreds of questions. skill_strand() itself is unchanged and
+    doesn't care that it's being handed a lightweight stand-in instead of a real ORM row - it
+    only ever reads these same 3 attributes."""
+    rows = (
+        db.query(EsslceQuestion.passage_id, EsslceQuestion.part, EsslceQuestion.section)
+        .join(EsslcePaper, EsslceQuestion.paper_id == EsslcePaper.id)
+        .filter(EsslcePaper.subject == subject, eligible_filter())
+        .all()
+    )
     counts: dict = {}
-    for paper in db.query(EsslcePaper).filter(EsslcePaper.subject == subject).all():
-        for question in paper.questions:
-            if not eligible(question):
-                continue
-            strand = skill_strand(question)
-            if strand is None:
-                continue
-            counts[strand] = counts.get(strand, 0) + 1
+    for passage_id, part, section in rows:
+        strand = skill_strand(SimpleNamespace(passage_id=passage_id, part=part, section=section))
+        if strand is None:
+            continue
+        counts[strand] = counts.get(strand, 0) + 1
     return [{"skill": s, "questions": n} for s, n in sorted(counts.items())]
 
 
@@ -1254,17 +1266,42 @@ def diagnostic_questions(db, subject: str, count: int = 15, stream: str | None =
 def eligible_units(db, subject: str) -> list:
     """Units with >=1 eligible (approved, keyed, no-diagram) question, for a student-facing unit picker -
     unlike unit_stats (admin-facing, counts every loaded question regardless of review state), this only
-    ever surfaces what a student could actually be served right now."""
+    ever surfaces what a student could actually be served right now.
+
+    Queries only the columns best_unit() actually reads (each question's topic links: grade,
+    unit, verified, score, rank) via a SQL filter (eligible_filter()) and an inner join to
+    EsslceTopicLink, not full EsslceQuestion ORM objects - same reason as eligible_skill_strands()
+    above: materializing every question of a subject (hundreds, for biology/chemistry) was enough
+    to OOM-kill the single worker process. best_unit()'s own subject short-circuit is pulled up
+    front here instead, since this function already knows the subject before querying at all."""
+    if subject in ESSLCE_SKILL_STRAND_SUBJECTS:
+        return []
+    rows = (
+        db.query(
+            EsslceQuestion.id,
+            EsslceTopicLink.grade,
+            EsslceTopicLink.unit,
+            EsslceTopicLink.verified,
+            EsslceTopicLink.score,
+            EsslceTopicLink.rank,
+        )
+        .join(EsslcePaper, EsslceQuestion.paper_id == EsslcePaper.id)
+        .join(EsslceTopicLink, EsslceTopicLink.question_id == EsslceQuestion.id)
+        .filter(EsslcePaper.subject == subject, eligible_filter())
+        .all()
+    )
+    by_question: dict[int, list] = {}
+    for qid, grade, unit, verified, score, rank in rows:
+        by_question.setdefault(qid, []).append(
+            SimpleNamespace(grade=grade, unit=unit, verified=verified, score=score, rank=rank)
+        )
     counts: dict = {}
-    for paper in db.query(EsslcePaper).filter(EsslcePaper.subject == subject).all():
-        for question in paper.questions:
-            if not eligible(question):
-                continue
-            unit_info = best_unit(question)
-            if unit_info is None:
-                continue
-            grade, unit, _ = unit_info
-            counts[(grade, unit)] = counts.get((grade, unit), 0) + 1
+    for links in by_question.values():
+        links.sort(key=lambda l: (not l.verified, l.score if l.score is not None else 9.0, l.rank))
+        if not links[0].unit:
+            continue
+        key = (links[0].grade, links[0].unit)
+        counts[key] = counts.get(key, 0) + 1
     return [
         {"grade": grade, "unit": unit, "questions": n}
         for (grade, unit), n in sorted(counts.items())
