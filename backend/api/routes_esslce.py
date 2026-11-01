@@ -24,6 +24,7 @@ from exams.store import (
     best_unit,
     diagnostic_questions,
     eligible,
+    eligible_filter,
     eligible_skill_strands,
     eligible_units,
     get_or_create_elaboration,
@@ -38,6 +39,7 @@ from practice.selection import classify_level, daily_trend, pick_questions
 from pydantic import BaseModel, Field
 from retriever.builder import RetrieverBuilder
 from retriever import vectorstore
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import Literal
 
@@ -315,42 +317,64 @@ def _build_outputs(db: Session, questions: list[EsslceQuestion]) -> list[EsslceQ
 # ---- routes -----------------------------------------------------------------
 @router.get("/subjects")
 def subjects(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    """ESSLCE subjects with at least one eligible (approved, keyed, no-diagram) question."""
-    counts: dict[str, int] = {}
-    for paper in db.query(EsslcePaper).all():
-        n = sum(1 for q in paper.questions if eligible(q))
-        if n:
-            counts[paper.subject] = counts.get(paper.subject, 0) + n
-    return {"subjects": [{"subject": s, "questions": n} for s, n in sorted(counts.items())]}
+    """ESSLCE subjects with at least one eligible (approved, keyed, no-diagram) question.
+
+    Counts via a SQL aggregate (JOIN + GROUP BY), not by loading every paper's every question as
+    a Python ORM object and checking eligible() on each one in a loop - confirmed live in
+    production that doing it that way, across the whole bank (65 papers, 5,050+ questions),
+    materialized enough objects to OOM-kill the single worker process. eligible_filter()
+    (exams/store.py) is the exact same eligibility rule as eligible(), expressed as a filter
+    instead of a per-object check, so this still has exactly one definition of "eligible" - it's
+    just evaluated by the database instead of by Python."""
+    rows = (
+        db.query(EsslcePaper.subject, func.count(EsslceQuestion.id))
+        .join(EsslceQuestion, EsslceQuestion.paper_id == EsslcePaper.id)
+        .filter(eligible_filter())
+        .group_by(EsslcePaper.subject)
+        .all()
+    )
+    return {"subjects": [{"subject": s, "questions": n} for s, n in sorted(rows)]}
 
 
 @router.get("/papers")
 def papers(
     subject: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> dict:
-    """Papers of this subject ready for a 'whole exam' attempt (>=1 eligible question)."""
-    rows = []
-    for paper in (
-        db.query(EsslcePaper)
-        .filter(EsslcePaper.subject == subject)
+    """Papers of this subject ready for a 'whole exam' attempt (>=1 eligible question) - same SQL-
+    aggregate approach as /subjects above, for the same reason (avoids materializing every
+    question of every paper in this subject just to count them)."""
+    rows_q = (
+        db.query(
+            EsslcePaper.id,
+            EsslcePaper.subject,
+            EsslcePaper.stream,
+            EsslcePaper.year_ec,
+            EsslcePaper.round,
+            EsslcePaper.region,
+            EsslcePaper.delivery_mode,
+            EsslcePaper.duration_minutes,
+            func.count(EsslceQuestion.id).label("ready_for_students"),
+        )
+        .join(EsslceQuestion, EsslceQuestion.paper_id == EsslcePaper.id)
+        .filter(EsslcePaper.subject == subject, eligible_filter())
+        .group_by(EsslcePaper.id)
         .order_by(EsslcePaper.year_ec)
         .all()
-    ):
-        n = sum(1 for q in paper.questions if eligible(q))
-        if n:
-            rows.append(
-                {
-                    "id": paper.id,
-                    "subject": paper.subject,
-                    "stream": paper.stream,
-                    "year_ec": paper.year_ec,
-                    "round": paper.round,
-                    "region": paper.region,
-                    "delivery_mode": paper.delivery_mode,
-                    "duration_minutes": paper.duration_minutes,
-                    "ready_for_students": n,
-                }
-            )
+    )
+    rows = [
+        {
+            "id": r.id,
+            "subject": r.subject,
+            "stream": r.stream,
+            "year_ec": r.year_ec,
+            "round": r.round,
+            "region": r.region,
+            "delivery_mode": r.delivery_mode,
+            "duration_minutes": r.duration_minutes,
+            "ready_for_students": r.ready_for_students,
+        }
+        for r in rows_q
+    ]
     if not rows:
         raise HTTPException(
             status_code=404, detail=f"No ESSLCE papers ready for students in '{subject}' yet."

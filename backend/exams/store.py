@@ -13,6 +13,7 @@ from pathlib import Path
 import storage
 from llm.client import parse_json_object
 from retriever.citation import citation_for
+from sqlalchemy import and_, or_
 from utils.logging import logger
 
 from .models import (
@@ -1050,6 +1051,29 @@ def eligible(q: EsslceQuestion) -> bool:
     if not q.has_diagram:
         return True
     return _diagram_photo_path(q) is not None
+
+
+def eligible_filter():
+    """The exact same rule as eligible() above, as a SQLAlchemy filter instead of a per-object
+    Python check - for a query that needs to COUNT eligible questions (api/routes_esslce.py's
+    /subjects and /papers) without first loading every paper's every question as a Python ORM
+    object just to throw almost all of them away. Confirmed live in production: db.query(
+    EsslcePaper).all() then `sum(1 for q in paper.questions if eligible(q))` across the whole
+    bank (65 papers, 5,050 questions at the time) materialized enough objects to OOM-kill the
+    single worker process outright - no exception, no log line, just an instance restart.
+    Must be kept in sync with eligible() by hand; requires the query to join EsslcePaper (for
+    source_dir) and EsslceQuestion."""
+    return and_(
+        EsslceQuestion.review_status == "approved",
+        EsslceQuestion.answer_index.isnot(None),
+        or_(
+            EsslceQuestion.has_diagram.is_(False),
+            and_(
+                EsslcePaper.source_dir.isnot(None),
+                EsslceQuestion.printed_page.isnot(None),
+            ),
+        ),
+    )
 
 
 def best_unit(q: EsslceQuestion):
