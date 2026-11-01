@@ -3,7 +3,6 @@ reviewed before the next one runs:  load -> key/solve -> approve -> link -> inde
 Nothing here guesses an answer."""
 
 import ast
-import functools
 import json
 import re
 import subprocess
@@ -1030,39 +1029,27 @@ def question_page_image(q: EsslceQuestion) -> bytes | None:
     return storage.download("exam-pages", path)
 
 
-@functools.lru_cache(maxsize=2048)
-def _diagram_image_exists(storage_path: str) -> bool:
-    """Cached, crash-safe existence check for eligible() below, which runs this for every
-    has_diagram question on every /subjects and /papers listing request - a real network call
-    to Supabase Storage per question, every time, with no cache, was confirmed live in production
-    to intermittently throw (a transient Storage timeout/connection error, uncaught) and crash the
-    whole listing request with a 500 - and because this project runs a single worker process,
-    that one crash blocked every OTHER concurrent request too, surfacing as unrelated-looking 502s.
-    A photo's existence never changes once uploaded, so this caches True/False indefinitely per
-    worker process; a failed check returns False (not eligible) rather than raising, since a
-    flaky storage call must never crash the caller - the question simply won't count as eligible
-    until the next successful check, which is a far smaller problem than taking down the service.
-
-    A short timeout (vs. download()'s default 30s): also confirmed live that a slow/unreachable
-    Storage call just made the whole thing hang well past 30s, with the single worker and every
-    other request queued behind it, rather than failing fast - there is no student waiting on
-    THIS specific photo the way there is at question_page_image()'s own call site, so there is
-    nothing to gain from a long wait here, only something to lose."""
-    try:
-        return storage.download("exam-pages", storage_path, timeout=4) is not None
-    except Exception:  # noqa: BLE001 - any failure here must degrade, never crash the caller
-        return False
-
-
 def eligible(q: EsslceQuestion) -> bool:
-    """Can be shown to a student: approved, has a key, and - if it needs a figure - the real source page
-    photo is actually available to show alongside it (never shown with a figure silently missing)."""
+    """Can be shown to a student: approved, has a key, and - if it needs a figure - a source page
+    photo is at least recorded for it (paper.source_dir and printed_page both set).
+
+    Does NOT verify the photo is actually fetchable right now. Two earlier attempts at that (a
+    live Storage call per diagram question on every /subjects and /papers listing request, then
+    the same call cached and given a short timeout) were both confirmed live in production to
+    make Storage's own slowness/unreachability take down the WHOLE service - with a single
+    worker process, one listing request waiting on Storage blocks every other concurrent request
+    behind it, and a hung Storage call turned a handful of diagram questions into a multi-minute
+    outage for every student. The actual fetch - and its own graceful "no image" fallback -
+    already happens at the one place that needs the real bytes: _build_outputs()'s
+    question_page_image() call (api/routes_esslce.py), scoped to only the handful of questions
+    actually being served in one response, never the whole corpus's diagram questions at once.
+    If a specific photo turns out to be missing there, that question's image is just omitted -
+    a small, isolated gap, not a reason to risk the entire listing path on a network call again."""
     if q.review_status != "approved" or q.answer_index is None:
         return False
     if not q.has_diagram:
         return True
-    path = _diagram_photo_path(q)
-    return path is not None and _diagram_image_exists(path)
+    return _diagram_photo_path(q) is not None
 
 
 def best_unit(q: EsslceQuestion):

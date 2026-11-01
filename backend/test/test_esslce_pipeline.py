@@ -190,12 +190,19 @@ assert ST.approve(db, paper, items={5}, who="teacher") == 1
 assert diagram_q.has_diagram and paper.source_dir == str(out["dir"])
 real_image = ST.question_page_image(diagram_q)
 assert real_image and ST.eligible(diagram_q)
-# ...but NOT if the paper predates source_dir being recorded (an older row, source_dir still None)
+# ...but NOT if the paper predates source_dir being recorded (an older row, source_dir still None) -
+# eligible() only checks that a path is at least recordable, so this is the one case it still catches
+# without ever calling Storage: no source_dir means there is no plausible path at all.
 paper.source_dir = None
 assert ST.question_page_image(diagram_q) is None and not ST.eligible(diagram_q)
-# ...nor if source_dir is set but the expected file is just missing from disk (never a broken reference)
+# ...but IS eligible once source_dir is set, even if the file turns out to be missing from disk -
+# eligible() deliberately no longer verifies the file is actually fetchable (a live Storage call
+# per diagram question on every listing request was confirmed live in production to let Storage's
+# own slowness take the whole single-worker service down for everyone, not just this one question).
+# question_page_image() - the one call site that actually needs the real bytes, scoped to only the
+# questions being served in one response - still correctly returns None for a genuinely missing file.
 paper.source_dir = str(TMP)  # a real dir that exists, but holds no p0N.jpg for this printed_page
-assert ST.question_page_image(diagram_q) is None and not ST.eligible(diagram_q)
+assert ST.question_page_image(diagram_q) is None and ST.eligible(diagram_q)
 paper.source_dir = str(out["dir"])  # restored for the rest of the test
 unkeyed = ST.load_paper(db, bad_out["dir"], allow_incomplete=True, log=quiet)
 assert ST.approve(db, unkeyed, items={1}) == 0 and ST.approve(db, unkeyed, all_clean=True) == 0              # no key, no approval
