@@ -43,7 +43,12 @@ function plainSegments(text: string, keyPrefix: string): React.ReactNode[] {
  * handling, reused here) for everything else - replaces the backend's PNG-image math rendering on the
  * web app (Telegram still gets the PNG, it has no way to run JS; see
  * docs/dev_plans/better_study_notes.md). Used wherever a response carries LaTeX-bearing text: study
- * notes, elaborate, ask-about-this-question, exam answer explanations. */
+ * notes, elaborate, ask-about-this-question, exam answer explanations.
+ *
+ * A formula standing on its own line (\[...\]/$$...$$) renders in its own indigo "formula card",
+ * visually distinct from inline math woven into a sentence (\(...\)/$...$, rendered bare) - the
+ * content-type coloring is one consistent rule here, not something each caller decides for itself
+ * (see docs/dev_plans/notes_colors_and_pdf.md). */
 export function MathText({ text, className }: { text: string; className?: string }) {
   const nodes = useMemo(() => {
     const parts: React.ReactNode[] = []
@@ -56,9 +61,18 @@ export function MathText({ text, className }: { text: string; className?: string
       const [, block1, inline1, block2, inline2] = m
       const latex = block1 ?? inline1 ?? block2 ?? inline2 ?? ""
       const displayMode = block1 !== undefined || block2 !== undefined
+      const html = { __html: renderMath(latex, displayMode) }
       parts.push(
-        // eslint-disable-next-line react/no-danger -- katex.renderToString's own output, not user HTML
-        <span key={`m${i++}`} dangerouslySetInnerHTML={{ __html: renderMath(latex, displayMode) }} />,
+        displayMode ? (
+          // A formula on its own line (as opposed to inline math woven into a sentence) gets its own
+          // visually distinct "formula card" - the content-type coloring the user asked for: every
+          // stated formula/theorem looks the same way everywhere MathText is used, not just in notes.
+          // eslint-disable-next-line react/no-danger -- katex.renderToString's own output, not user HTML
+          <div key={`m${i++}`} className="my-2 overflow-x-auto rounded-lg bg-indigo-50 px-3 py-2 text-center" dangerouslySetInnerHTML={html} />
+        ) : (
+          // eslint-disable-next-line react/no-danger -- katex.renderToString's own output, not user HTML
+          <span key={`m${i++}`} dangerouslySetInnerHTML={html} />
+        ),
       )
       last = m.index + m[0].length
     }

@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, BookMarked, Lightbulb } from "lucide-react"
+import { ArrowLeft, BookMarked, Download, Lightbulb } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
 import { MathText } from "../../components/ui/MathText"
 import { ErrorBanner, Spinner } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
+import { downloadElementAsPdf } from "../../lib/pdf"
 import { errorMessage, notes, type StudyNote, type StudyNoteSection } from "../../lib/api"
 
 function citationLine(citation: StudyNoteSection["citation"]): string | null {
@@ -29,7 +30,8 @@ function SectionBlock({ section }: { section: StudyNoteSection }) {
         <MathText text={section.summary} />
       </p>
       {section.examples.map((example, i) => (
-        <div key={i} className="mt-2 rounded-lg bg-zinc-50 p-3 text-[14px] leading-relaxed text-zinc-700">
+        <div key={i} className="mt-2 rounded-lg bg-emerald-50 p-3 text-[14px] leading-relaxed text-zinc-700">
+          <p className="mb-1 text-xs font-semibold tracking-wide text-emerald-700 uppercase">Example</p>
           <MathText text={example} />
         </div>
       ))}
@@ -43,6 +45,22 @@ function SectionBlock({ section }: { section: StudyNoteSection }) {
   )
 }
 
+function NoteContent({ note }: { note: StudyNote }) {
+  return (
+    <>
+      <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900">
+        <Lightbulb className="size-4 text-brand-600" aria-hidden /> Overview
+      </p>
+      <p className="text-[15px] leading-relaxed text-zinc-700">{note.overview}</p>
+      <div className="mt-4 flex flex-col gap-4">
+        {note.sections.map((s) => (
+          <SectionBlock key={s.number} section={s} />
+        ))}
+      </div>
+    </>
+  )
+}
+
 export function NotesDetailPage() {
   const { subject = "", unit = "" } = useParams()
   const { gradeLevel } = useAuth()
@@ -50,6 +68,8 @@ export function NotesDetailPage() {
   const [note, setNote] = useState<StudyNote | null>(null)
   const [stage, setStage] = useState("Getting your notes ready...")
   const [error, setError] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
+  const printRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setNote(null)
@@ -60,6 +80,16 @@ export function NotesDetailPage() {
       .then(setNote)
       .catch((e) => setError(errorMessage(e)))
   }, [gradeLevel, subject, unit])
+
+  async function downloadPdf() {
+    if (!printRef.current) return
+    setDownloading(true)
+    try {
+      await downloadElementAsPdf(printRef.current, `${subject}-${unit}.pdf`.replace(/\s+/g, "_"))
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -82,24 +112,30 @@ export function NotesDetailPage() {
       {note && (
         <>
           <Card className="flex flex-col gap-2 p-4">
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900">
-              <Lightbulb className="size-4 text-brand-600" aria-hidden /> Overview
-            </p>
-            <p className="text-[15px] leading-relaxed text-zinc-700">{note.overview}</p>
+            <NoteContent note={note} />
           </Card>
 
-          <Card className="flex flex-col gap-4 p-4">
-            {note.sections.map((s) => (
-              <SectionBlock key={s.number} section={s} />
-            ))}
-          </Card>
+          <div className="flex gap-2">
+            <Button
+              fullWidth
+              onClick={() => navigate(`/practice/${encodeURIComponent(subject)}/session?units=${encodeURIComponent(unit)}`)}
+            >
+              Practice this unit
+            </Button>
+            <Button variant="secondary" onClick={downloadPdf} disabled={downloading}>
+              <Download className="size-4" aria-hidden /> {downloading ? "Preparing..." : "PDF"}
+            </Button>
+          </div>
 
-          <Button
-            fullWidth
-            onClick={() => navigate(`/practice/${encodeURIComponent(subject)}/session?units=${encodeURIComponent(unit)}`)}
-          >
-            Practice this unit
-          </Button>
+          {/* Off-screen (not display:none - html2canvas needs a real layout to capture), fixed-width
+              mirror of the same note content, used only as the source for downloadElementAsPdf - a
+              dedicated print-friendly layout rather than capturing the interactive on-screen view
+              itself (which has app chrome/nav this shouldn't include). */}
+          <div className="pointer-events-none fixed top-0 left-[-9999px] w-[650px] bg-white p-6" ref={printRef}>
+            <h1 className="mb-1 text-xl font-semibold text-zinc-900">{unit}</h1>
+            <p className="mb-4 text-sm text-zinc-500">{subject.replace(/_/g, " ")}</p>
+            <NoteContent note={note} />
+          </div>
         </>
       )}
     </div>
