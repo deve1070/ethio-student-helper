@@ -1,8 +1,8 @@
-"""Generates and caches a Study Note: a hierarchical breakdown of a whole textbook unit into subtopics
-(+ key formulas and a worked example for calculation subjects), grounded in the textbook corpus the same
-way ESSLCE elaborations are - retrieval, quote-verification, and a deterministic citation per subtopic,
-never a bare LLM claim. Pure content generation; the caller (api/routes_notes.py) handles the DB cache
-lookup and LaTeX-to-PNG rendering.
+"""Generates and caches a Study Note: a hierarchical breakdown of a whole textbook unit into subtopics,
+each with its own formula/theorem and worked example(s) for calculation subjects, grounded in the textbook
+corpus the same way ESSLCE elaborations are - retrieval, quote-verification, and a deterministic citation
+per subtopic, never a bare LLM claim. Pure content generation; the caller (api/routes_notes.py) handles the
+DB cache lookup.
 
 Section NUMBERING ("3.1", "3.1.2", ...) is assigned deterministically in code from the unit's own
 leading number and each section's position - never trusted from the LLM's own text - but the numbers
@@ -65,7 +65,11 @@ sub-topics - use level 2 only where it earns its place).
 For EACH entry (either level), give:
 - "heading": a short, clear title (a few words - do NOT include any number, numbering is added separately)
 - "level": 1 or 2 (a level-2 entry is a sub-topic of the level-1 entry immediately before it)
-- "summary": 2-4 sentences grounded in the excerpts
+- "summary": 2-4 sentences grounded in the excerpts, explaining the concept clearly enough to actually \
+study from - not just naming it. Where a short, concrete illustration (a real instance of the concept, a \
+brief "for example, ...") would make an abstract statement click for a Grade {grade} student, include one; \
+skip it where the concept is already concrete or an example wouldn't add anything. You decide per subtopic \
+- never force an example in, never a fixed count.
 - "source_index": the index of the ONE excerpt below that most directly supports that summary
 - "supporting_quote": one verbatim quote from that excerpt backing the summary
 
@@ -166,18 +170,53 @@ Include as many sections as the excerpts genuinely support - do not pad with fil
 content the excerpts don't contain. If the excerpts don't let you ground any real point, reply \
 {{"overview": null, "sections": []}} - no notes are better than ungrounded ones."""
 
-CALC_SUPPLEMENT_PROMPT = """For the same topic "{unit}" ({subject}, Grade {grade}), using ONLY the \
-excerpts below:
-1. List the key formulas a student needs for this topic, each as a separate LaTeX fragment.
-2. Write ONE worked example applying one of these formulas, solved step by step.
+# Replaces what used to be a single CALC_SUPPLEMENT_PROMPT call AFTER all sections were built, producing
+# one worked example for the WHOLE unit, detached from whichever subtopic it happened to illustrate - the
+# user pointed at a reference note (a math textbook's own Study Notes) where every subtopic states its own
+# formula and is followed immediately by one or more worked "Example: / Solution:" blocks for THAT formula,
+# not a separate list of formulas plus one example somewhere else. A full separate prompt, not an addendum
+# appended onto UNIT_PROMPT's generic schema - the SAME lesson ENGLISH_UNIT_PROMPT's own comment already
+# documents: putting the real requirement into the field's own description is what changes the output,
+# not a generic rule stacked on top of a schema meant for a different kind of content.
+CALC_UNIT_PROMPT = """You are writing hierarchical Study Notes for an Ethiopian Grade {grade} student on the \
+topic "{unit}" ({subject}), based ONLY on the excerpts below, which cover the unit's content across many \
+pages.
+
+Break the unit into a hierarchical outline of subtopics that together cover everything the excerpts \
+actually discuss - not just one part of the unit. Use two levels: a level-1 entry for each major theme, \
+and a level-2 entry for a theme that genuinely needs breaking down further (not every level-1 topic needs \
+sub-topics - use level 2 only where it earns its place).
+
+For EACH entry (either level), give:
+- "heading": a short, clear title (a few words - do NOT include any number, numbering is added separately)
+- "level": 1 or 2 (a level-2 entry is a sub-topic of the level-1 entry immediately before it)
+- "summary": state the actual formula, theorem, or rule this subtopic is about, as LaTeX (\\( \\) or \\[ \\] \
+delimiters) - never just a description of what the formula is "for" without writing it - then explain in \
+plain words what it means and when/why it's used. A subtopic that is a pure definition (no formula) just \
+gets a clear explanation of the definition.
+- "examples": a list of worked examples specific to THIS subtopic's own formula - each one a complete, \
+self-contained string: a short problem statement, then a full step-by-step solution showing the actual \
+algebra/substitution at each step (not just the final answer), in LaTeX. Decide how many this subtopic \
+needs (often 1, sometimes 2 if the formula has genuinely different cases worth showing, 0 only for a \
+subtopic with no formula to work through, like a bare definition) - never pad with a trivial example just \
+to have one, never skip an example a formula genuinely needs.
+- "source_index": the index of the ONE excerpt below that most directly supports this subtopic
+- "supporting_quote": one verbatim quote from that excerpt, anchoring that this subtopic is really covered \
+here (it does not have to contain the formula or worked example itself - the excerpt may only state the \
+topic, with the formula/examples supplied from your own subject knowledge, pitched at this grade level)
+
+Also write "overview": a 1-2 sentence overview of the whole unit, written after you've worked out the \
+subtopics below it.
 
 Excerpts:
 {context}
 
 Reply with ONLY a JSON object, no other text:
-{{"key_formulas": ["...", "..."], "worked_example": "the full worked example, with LaTeX"}}
-If the excerpts don't contain any real formulas for this topic, reply \
-{{"key_formulas": [], "worked_example": null}}."""
+{{"overview": "...", "sections": [{{"heading": "...", "level": 1, "summary": "...", "examples": ["..."], \
+"source_index": 0, "supporting_quote": "..."}}, ...]}}
+Include as many sections as the excerpts genuinely support - do not pad with filler, and do not invent \
+content the excerpts don't contain. If the excerpts don't let you ground any real subtopic, reply \
+{{"overview": null, "sections": []}} - no notes are better than ungrounded ones."""
 
 
 def _retrieve_unit(tb_store, grade: int, subject: str, unit: str, k: int = UNIT_RETRIEVAL_K):
@@ -212,9 +251,12 @@ def _unit_number(unit: str) -> str | None:
 
 def _numbered_sections(db, data: dict, excerpts: list[str], vector_ids: list[str | None], unit_num: str | None):
     """Verifies each proposed section's quote independently and drops any that fail - one bad citation
-    never fails the whole note, the same graceful-degradation the calc supplement already uses below.
-    Numbers are assigned here, in order, from `unit_num` and each kept section's own level - never
-    parsed from (or trusted to be consistent in) the LLM's own output."""
+    never fails the whole note. Numbers are assigned here, in order, from `unit_num` and each kept
+    section's own level - never parsed from (or trusted to be consistent in) the LLM's own output.
+
+    "examples" (CALC_UNIT_PROMPT only - absent for every other prompt) is carried through as-is, not
+    independently quote-verified: it's elaboration grounded in this section's own already-verified quote,
+    the same trust level ENGLISH_UNIT_PROMPT's much longer "summary" text already gets."""
     top, sub = 0, 0
     out = []
     for s in data.get("sections") or []:
@@ -237,11 +279,15 @@ def _numbered_sections(db, data: dict, excerpts: list[str], vector_ids: list[str
             sub = 0
             number = f"{unit_num}.{top}" if unit_num else str(top)
 
+        examples = s.get("examples")
         out.append(
             {
                 "number": number,
                 "heading": heading.strip(),
                 "summary": summary.strip(),
+                "examples": [e.strip() for e in examples if isinstance(e, str) and e.strip()]
+                if isinstance(examples, list)
+                else [],
                 "citation": citation_for(db, vector_ids[src_idx]),
             }
         )
@@ -347,8 +393,11 @@ def generate_note(
     context = "\n\n".join(f"[{i}] {text}" for i, text in enumerate(excerpts))
 
     is_english = subject in LANGUAGE_SKILL_SUBJECTS
+    is_calculation = subject in CALCULATION_SUBJECTS
     if is_english:
         prompt = ENGLISH_UNIT_PROMPT.format(grade=grade, unit=unit, context=context)
+    elif is_calculation:
+        prompt = CALC_UNIT_PROMPT.format(grade=grade, subject=subject, unit=unit, context=context)
     else:
         prompt = UNIT_PROMPT.format(grade=grade, subject=subject, unit=unit, context=context)
 
@@ -421,44 +470,12 @@ def generate_note(
             if repaired:
                 s["summary"] = repaired
 
-    is_calculation = subject in CALCULATION_SUBJECTS
-    result = {
+    return {
         "resolved": True,
         "overview": data["overview"].strip(),
         "sections": sections,
-        "key_formulas": None,
-        "worked_example": None,
         "is_calculation": is_calculation,
     }
-
-    if is_calculation:
-        on_stage("Adding formulas and a worked example...")
-        try:
-            raw2 = (
-                llm.chat(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": CALC_SUPPLEMENT_PROMPT.format(
-                                grade=grade, subject=subject, unit=unit, context=context
-                            ),
-                        }
-                    ]
-                )["choices"][0]["message"]["content"]
-                or ""
-            ).strip()
-        except Exception:  # noqa: BLE001 - same fallback as above: no formulas beats a crash
-            raw2 = ""
-        data2 = parse_json_object(raw2)
-        formulas = data2.get("key_formulas") if data2 else None
-        example = data2.get("worked_example") if data2 else None
-        # A note without a worked example still beats no note at all (the sections are already grounded
-        # and verified) - the calc supplement just doesn't resolve, it never fails the whole note.
-        if isinstance(formulas, list) and isinstance(example, str) and example.strip():
-            result["key_formulas"] = [f.strip() for f in formulas if isinstance(f, str) and f.strip()]
-            result["worked_example"] = example.strip()
-
-    return result
 
 
 def get_or_create_note(
@@ -486,8 +503,6 @@ def get_or_create_note(
         unit=unit,
         overview=result["overview"],
         sections=result["sections"],
-        key_formulas=result["key_formulas"],
-        worked_example=result["worked_example"],
         is_calculation=result["is_calculation"],
     )
     db.add(row)

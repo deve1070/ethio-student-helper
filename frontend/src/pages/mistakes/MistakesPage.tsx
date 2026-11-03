@@ -6,6 +6,7 @@ import { Card } from "../../components/ui/Card"
 import { EmptyState, ErrorBanner, FullPageSpinner } from "../../components/ui/Primitives"
 import { OptionList } from "../../components/question/OptionList"
 import { ReadingPassage } from "../../components/esslce/ReadingPassage"
+import { MathText } from "../../components/ui/MathText"
 import { RichText } from "../../components/ui/RichText"
 import { useAuth } from "../../lib/auth"
 import {
@@ -129,7 +130,11 @@ export function MistakesPage() {
                 <Card key={m.question_id} className="flex flex-col gap-3 p-4">
                   <p className="text-[15px] leading-relaxed text-zinc-900">{m.question}</p>
                   <OptionList options={m.options} selected={m.chosen_index} correctIndex={m.correct_index} onSelect={() => {}} disabled />
-                  {m.explanation && <p className="text-sm leading-relaxed text-zinc-600">{m.explanation}</p>}
+                  {m.explanation && (
+                    <p className="text-sm leading-relaxed text-zinc-600">
+                      <MathText text={m.explanation} />
+                    </p>
+                  )}
                   <Button size="sm" variant="secondary" onClick={() => tryAgain(m.unit)}>
                     <RefreshCw className="size-4" aria-hidden /> Try a similar question <ArrowRight className="size-4" aria-hidden />
                   </Button>
@@ -146,14 +151,10 @@ export function MistakesPage() {
                     <RichText text={m.stem} />
                   </p>
                   <OptionList options={m.options} selected={m.chosen_index} correctIndex={m.correct_index} onSelect={() => {}} disabled />
-                  {m.explanation_image_base64 ? (
-                    <img
-                      src={`data:image/png;base64,${m.explanation_image_base64}`}
-                      alt="Worked solution"
-                      className="rounded-lg border border-zinc-100"
-                    />
-                  ) : (
-                    m.explanation && <p className="text-sm leading-relaxed text-zinc-600">{m.explanation}</p>
+                  {m.explanation && (
+                    <p className="text-sm leading-relaxed text-zinc-600">
+                      <MathText text={m.explanation} />
+                    </p>
                   )}
                   <Button size="sm" variant="secondary" onClick={() => tryAgain(m.unit, m.skill)}>
                     <RefreshCw className="size-4" aria-hidden /> Try a similar question <ArrowRight className="size-4" aria-hidden />

@@ -53,7 +53,7 @@ class FakeTextbookStore:
         return []
 
 
-llm_state = {"unit": None, "calc": None, "raise_error": False}
+llm_state = {"unit": None, "raise_error": False}
 
 
 class ProviderTooLarge(Exception):
@@ -67,9 +67,7 @@ class FakeLLM:
     def chat(self, messages):
         if llm_state["raise_error"]:
             raise ProviderTooLarge("Request too large for model ... (simulated)")
-        content = messages[0]["content"]
-        key = "calc" if "key formulas" in content else "unit"
-        return {"choices": [{"message": {"content": json.dumps(llm_state[key])}}]}
+        return {"choices": [{"message": {"content": json.dumps(llm_state["unit"])}}]}
 
 
 stub("config")
@@ -168,6 +166,7 @@ llm_state["unit"] = {
             "heading": "Limits",
             "level": 1,
             "summary": "A limit is the value a function approaches near a point.",
+            "examples": ["Example: As x approaches 2, f(x) = x+1 approaches 3. Solution: lim(x->2) x+1 = 3."],
             "source_index": 0,
             "supporting_quote": "A limit describes the value a function approaches as the input gets close to a certain point.",
         },
@@ -199,6 +198,10 @@ assert [s["heading"] for s in b["sections"]] == ["Limits", "Continuity"], b["sec
 assert [s["number"] for s in b["sections"]] == ["2.1", "2.2"], b["sections"]
 assert b["sections"][0]["citation"]["page_start"] == 56
 assert b["sections"][0]["citation"]["unit_or_chapter"] == "Unit 2: Limits and Continuity"
+# "examples" (CALC_UNIT_PROMPT's per-section worked examples) passes through for a section that has one...
+assert b["sections"][0]["examples"] == llm_state["unit"]["sections"][0]["examples"], b["sections"][0]
+# ...and defaults to an empty list, not missing/null, for a section whose proposed JSON omits it entirely
+assert b["sections"][1]["examples"] == [], b["sections"][1]
 
 db2 = Session()
 assert db2.query(NM.StudyNote).count() == 1

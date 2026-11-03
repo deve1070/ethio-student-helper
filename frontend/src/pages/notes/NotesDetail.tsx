@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, BookMarked, Lightbulb, Sigma } from "lucide-react"
+import { ArrowLeft, BookMarked, Lightbulb } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
+import { MathText } from "../../components/ui/MathText"
 import { ErrorBanner, Spinner } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
 import { errorMessage, notes, type StudyNote, type StudyNoteSection } from "../../lib/api"
@@ -24,7 +25,14 @@ function SectionBlock({ section }: { section: StudyNoteSection }) {
         <span className="mr-1.5 text-zinc-400">{section.number}</span>
         {section.heading}
       </p>
-      <p className="mt-1 text-[15px] leading-relaxed text-zinc-700">{section.summary}</p>
+      <p className="mt-1 text-[15px] leading-relaxed text-zinc-700">
+        <MathText text={section.summary} />
+      </p>
+      {section.examples.map((example, i) => (
+        <div key={i} className="mt-2 rounded-lg bg-zinc-50 p-3 text-[14px] leading-relaxed text-zinc-700">
+          <MathText text={example} />
+        </div>
+      ))}
       {citationLine(section.citation) && (
         <p className="mt-1 flex items-center gap-1.5 text-xs text-zinc-400">
           <BookMarked className="size-3 shrink-0" aria-hidden />
@@ -85,30 +93,6 @@ export function NotesDetailPage() {
               <SectionBlock key={s.number} section={s} />
             ))}
           </Card>
-
-          {note.formulas_image_base64 && (
-            <Card className="flex flex-col gap-3 p-4">
-              <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900">
-                <Sigma className="size-4 text-accent-600" aria-hidden /> Key formulas
-              </p>
-              <img
-                src={`data:image/png;base64,${note.formulas_image_base64}`}
-                alt="Key formulas"
-                className="rounded-lg border border-zinc-100"
-              />
-            </Card>
-          )}
-
-          {note.worked_example_image_base64 && (
-            <Card className="flex flex-col gap-3 p-4">
-              <p className="text-sm font-semibold text-zinc-900">Worked example</p>
-              <img
-                src={`data:image/png;base64,${note.worked_example_image_base64}`}
-                alt="Worked example"
-                className="rounded-lg border border-zinc-100"
-              />
-            </Card>
-          )}
 
           <Button
             fullWidth

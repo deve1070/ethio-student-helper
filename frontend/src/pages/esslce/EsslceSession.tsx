@@ -9,6 +9,7 @@ import { QuestionNavigator } from "../../components/esslce/QuestionNavigator"
 import { ElaboratePanel } from "../../components/esslce/ElaboratePanel"
 import { AskChatPanel } from "../../components/esslce/AskChatPanel"
 import { ReadingPassage } from "../../components/esslce/ReadingPassage"
+import { MathText } from "../../components/ui/MathText"
 import { RichText } from "../../components/ui/RichText"
 import { errorMessage, esslce, type EsslceAnswer, type EsslceMode, type EsslceQuestion } from "../../lib/api"
 import type { ExamResultItem } from "./EsslceSummary"
@@ -226,16 +227,10 @@ export function EsslceSessionPage() {
                 )}
                 {feedback.is_correct ? "Correct" : "Not quite"}
               </p>
-              {feedback.explanation_image_base64 ? (
-                <img
-                  src={`data:image/png;base64,${feedback.explanation_image_base64}`}
-                  alt="Worked solution"
-                  className="rounded-lg border border-zinc-100"
-                />
-              ) : (
-                feedback.explanation && (
-                  <p className="text-[15px] leading-relaxed text-zinc-700">{feedback.explanation}</p>
-                )
+              {feedback.explanation && (
+                <p className="text-[15px] leading-relaxed text-zinc-700">
+                  <MathText text={feedback.explanation} />
+                </p>
               )}
               <div className="flex flex-wrap gap-2">
                 <ElaboratePanel questionId={current.id} />
