@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ArrowLeft, BookMarked, CheckCircle2, RotateCcw, XCircle } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
+import { MathText } from "../../components/ui/MathText"
 import { EmptyState, ErrorBanner, FullPageSpinner } from "../../components/ui/Primitives"
 import { OptionList } from "../../components/question/OptionList"
 import { useAuth } from "../../lib/auth"
@@ -126,7 +127,9 @@ export function PracticeSessionPage() {
                 )}
                 {feedback.is_correct ? "Correct" : "Not quite"}
               </p>
-              <p className="text-[15px] leading-relaxed text-zinc-700">{feedback.explanation}</p>
+              <p className="text-[15px] leading-relaxed text-zinc-700">
+                <MathText text={feedback.explanation} />
+              </p>
               <p className="rounded-lg bg-zinc-50 p-3 text-sm italic text-zinc-500">
                 "{feedback.supporting_quote}"
               </p>

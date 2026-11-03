@@ -4,7 +4,6 @@ from practice-question or ESSLCE content, since Study Notes exist independent of
 net-new content TYPE in this feature set, but reuses the same retrieval + LLM + LaTeX-rendering
 infrastructure every other grounded feature already has."""
 
-import base64
 import queue
 import threading
 
@@ -12,7 +11,6 @@ from auth.dependencies import get_current_user
 from config import constants
 from db.models import User
 from db.session import get_db
-from exams.latex_render import render_latex_png, wrap_as_math
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from llm.client import LLMClient
@@ -53,6 +51,9 @@ class NoteSection(BaseModel):
     number: str
     heading: str
     summary: str
+    examples: list[str] = []  # worked examples for THIS subtopic's own formula - only ever non-empty for
+    # a calculation subject (notes.store.CALC_UNIT_PROMPT); rendered client-side via MathText, same as
+    # summary - the backend sends raw LaTeX-bearing text, not a pre-rendered image, for the web app.
     citation: dict | None
 
 
@@ -61,10 +62,6 @@ class NoteResponse(BaseModel):
     unit: str
     overview: str
     sections: list[NoteSection]
-    key_formulas: list[str] | None
-    formulas_image_base64: str | None = None
-    worked_example: str | None
-    worked_example_image_base64: str | None = None
     is_calculation: bool
 
 
@@ -106,22 +103,6 @@ def _note_events(grade: int, subject: str, unit: str, db: Session):
         yield format_sse_event({"done": True, "error": "Could not generate grounded study notes for this topic yet."})
         return
 
-    formulas_image = None
-    if row.is_calculation and row.key_formulas:
-        yield format_sse_event({"stage": "Formatting formulas..."})
-        # each entry is a standalone formula fragment, often with no delimiter of its own at all (unlike
-        # worked_example, where narration forces the model to mark where the math starts/ends) - wrap each
-        # one explicitly rather than trusting it already has (or needs) one.
-        png = render_latex_png("\n".join(wrap_as_math(f) for f in row.key_formulas))
-        if png:
-            formulas_image = base64.b64encode(png).decode()
-
-    example_image = None
-    if row.is_calculation and row.worked_example:
-        png = render_latex_png(row.worked_example)
-        if png:
-            example_image = base64.b64encode(png).decode()
-
     yield format_sse_event({
         "done": True,
         **NoteResponse(
@@ -129,10 +110,6 @@ def _note_events(grade: int, subject: str, unit: str, db: Session):
             unit=row.unit,
             overview=row.overview,
             sections=row.sections,
-            key_formulas=row.key_formulas,
-            formulas_image_base64=formulas_image,
-            worked_example=row.worked_example,
-            worked_example_image_base64=example_image,
             is_calculation=row.is_calculation,
         ).model_dump(),
     })

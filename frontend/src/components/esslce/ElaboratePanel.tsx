@@ -2,6 +2,7 @@ import { useState } from "react"
 import { BookMarked, Lightbulb } from "lucide-react"
 import { Button } from "../ui/Button"
 import { Card } from "../ui/Card"
+import { MathText } from "../ui/MathText"
 import { Spinner } from "../ui/Primitives"
 import { errorMessage, esslce, type EsslceElaboration } from "../../lib/api"
 import { useDelayedStatus } from "../../lib/useDelayedStatus"
@@ -45,15 +46,9 @@ export function ElaboratePanel({ questionId }: { questionId: number }) {
       {state === "error" && <p className="text-sm text-red-600">{error}</p>}
       {state === "done" && data && (
         <>
-          {data.content_image_base64 ? (
-            <img
-              src={`data:image/png;base64,${data.content_image_base64}`}
-              alt="Worked explanation"
-              className="rounded-lg border border-zinc-100"
-            />
-          ) : (
-            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-700">{data.content}</p>
-          )}
+          <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-700">
+            <MathText text={data.content} />
+          </p>
           {data.citation && (
             <p className="flex items-center gap-1.5 text-xs text-zinc-400">
               <BookMarked className="size-3.5" aria-hidden />

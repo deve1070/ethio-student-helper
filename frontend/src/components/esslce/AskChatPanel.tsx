@@ -2,6 +2,7 @@ import { useState } from "react"
 import { MessageCircle, Send } from "lucide-react"
 import { Button } from "../ui/Button"
 import { Card } from "../ui/Card"
+import { MathText } from "../ui/MathText"
 import { Spinner } from "../ui/Primitives"
 import { errorMessage, esslce } from "../../lib/api"
 import { useDelayedStatus } from "../../lib/useDelayedStatus"
@@ -9,7 +10,6 @@ import { useDelayedStatus } from "../../lib/useDelayedStatus"
 interface Message {
   role: "user" | "assistant"
   content: string
-  imageBase64?: string | null
 }
 
 export function AskChatPanel({ questionId }: { questionId: number }) {
@@ -31,10 +31,7 @@ export function AskChatPanel({ questionId }: { questionId: number }) {
     try {
       const history = nextMessages.slice(-12)
       const res = await esslce.ask(questionId, text, history)
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: res.reply, imageBase64: res.reply_image_base64 },
-      ])
+      setMessages((m) => [...m, { role: "assistant", content: res.reply }])
     } catch (e) {
       setError(errorMessage(e))
     } finally {
@@ -69,15 +66,7 @@ export function AskChatPanel({ questionId }: { questionId: number }) {
               (m.role === "user" ? "self-end bg-brand-600 text-white" : "self-start bg-zinc-100 text-zinc-800")
             }
           >
-            {m.imageBase64 ? (
-              <img
-                src={`data:image/png;base64,${m.imageBase64}`}
-                alt="Worked explanation"
-                className="max-w-full rounded-lg"
-              />
-            ) : (
-              m.content
-            )}
+            <MathText text={m.content} />
           </div>
         ))}
         {sending && (

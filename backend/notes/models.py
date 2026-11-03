@@ -16,9 +16,9 @@ class StudyNote(Base):
     subject = Column(String(64), nullable=False)
     unit = Column(String(255), nullable=False)
     overview = Column(Text, nullable=False)  # 1-2 sentence summary of the whole unit
-    sections = Column(JSON, nullable=False)  # list[{"number", "heading", "summary", "citation"}] - see
-    # notes.store._numbered_sections for how "number" (e.g. "3.1", "3.1.2") is assigned
-    key_formulas = Column(JSON)  # list[str] of LaTeX fragments - only ever set for a calculation subject
-    worked_example = Column(Text)  # plain prose + LaTeX - only ever set for a calculation subject
+    sections = Column(JSON, nullable=False)  # list[{"number", "heading", "summary", "examples", "citation"}]
+    # - see notes.store._numbered_sections for how "number" (e.g. "3.1", "3.1.2") is assigned. "examples"
+    # (list[str], each a full worked example with LaTeX) is only ever populated for a calculation subject
+    # (notes.store.CALC_UNIT_PROMPT) - empty for every other subject.
     is_calculation = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

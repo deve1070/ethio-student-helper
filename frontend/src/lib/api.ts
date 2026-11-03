@@ -396,6 +396,8 @@ export interface StudyNoteSection {
   number: string
   heading: string
   summary: string
+  examples: string[] // worked examples for THIS subtopic's own formula - only ever non-empty for a
+  // calculation subject; rendered via MathText, same as summary (see notes/store.py's CALC_UNIT_PROMPT)
   citation: StudyNoteCitation | null
 }
 export interface StudyNote {
@@ -403,10 +405,6 @@ export interface StudyNote {
   unit: string
   overview: string
   sections: StudyNoteSection[]
-  key_formulas: string[] | null
-  formulas_image_base64: string | null
-  worked_example: string | null
-  worked_example_image_base64: string | null
   is_calculation: boolean
 }
 export const notes = {

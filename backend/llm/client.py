@@ -17,15 +17,32 @@ from config.settings import settings
 from langchain_groq import ChatGroq
 from llm.retry import invoke_with_retry
 
-# An LLM sometimes writes informal notation inside a JSON string value - e.g. "A\B" for set difference -
-# a literal backslash not followed by one of JSON's own escape characters, which json.loads rejects
-# outright ("Invalid \escape") even though the rest of the object is well-formed. Confirmed for real:
-# notes/store.py's UNIT_PROMPT reply for "Further on Sets" failed to parse on roughly half of a series of
-# otherwise-identical calls, always at exactly this kind of stray backslash, never at a structural
-# problem. Doubling any backslash that isn't already starting a real JSON escape (quote/backslash/
-# slash/b/f/n/r/t/u-plus-4-hex) turns it into an escaped literal backslash, matching what the model
-# actually meant, instead of failing the whole response.
-_INVALID_ESCAPE = re.compile(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})')
+# An LLM sometimes writes informal notation inside a JSON string value - e.g. "A\B" for set difference, or
+# a LaTeX command like "\," (thin space) it forgot to double-escape - a literal backslash not followed by
+# one of JSON's own escape characters, which json.loads rejects outright ("Invalid \escape") even though
+# the rest of the object is well-formed. Confirmed for real: notes/store.py's UNIT_PROMPT reply for
+# "Further on Sets" failed to parse on roughly half of a series of otherwise-identical calls, always at
+# exactly this kind of stray backslash, never at a structural problem.
+#
+# Matches ONE token at a time - either an already-valid "\\" pair (left alone) or a single backslash not
+# followed by a real JSON escape char (doubled into one). The two alternatives matter: a naive "double
+# every backslash not immediately followed by a valid escape char" (the previous version of this fix) ran
+# the regex at one backslash position at a time with no memory that a PRECEDING backslash already paired
+# with it - so a genuinely valid "\\(" (an escaped backslash, then a bare paren) got its second backslash
+# doubled too, turning correct JSON into broken JSON. Confirmed for real: notes/store.py's new
+# CALC_UNIT_PROMPT asks for \( \)/\[ \] LaTeX delimiters, which are exactly this shape and never appeared
+# densely enough in any earlier prompt's output to expose the bug until now. Matching "\\" as one 2-char
+# token first, via alternation, means the regex engine consumes both characters together and never
+# re-examines the second backslash on its own.
+_ESCAPE_TOKEN = re.compile(r'\\\\|\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})')
+
+
+def _fix_invalid_escapes(text: str) -> str:
+    def repl(m: re.Match) -> str:
+        tok = m.group(0)
+        return tok if tok == "\\\\" else "\\" + tok  # already-valid pair: leave it; lone bad backslash: double it
+
+    return _ESCAPE_TOKEN.sub(repl, text)
 
 
 def parse_json_object(raw: str) -> dict | None:
@@ -40,7 +57,7 @@ def parse_json_object(raw: str) -> dict | None:
         data = json.loads(candidate)
     except json.JSONDecodeError:
         try:
-            data = json.loads(_INVALID_ESCAPE.sub(r"\\\\", candidate))
+            data = json.loads(_fix_invalid_escapes(candidate))
         except json.JSONDecodeError:
             return None
     return data if isinstance(data, dict) else None
