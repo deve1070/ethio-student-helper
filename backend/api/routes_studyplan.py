@@ -1,123 +1,124 @@
-"""Student-facing Today's Study Plan: GET generates it once per calendar day (and serves the same
-tasks on every later request that day), POST marks a task done/undone. Spans both QuizQuestion-practice
-and ESSLCE the same way routes_progress.py's streak endpoint does - calling each system's OWN existing
-progress logic independently and combining only the resulting task candidates, never their data models."""
+"""Student-facing multi-day Study Plan: GET generates this week's plan once per (user, week-start-date)
+and serves the same tasks on every later request within that window, so a checked-off task doesn't lose
+its identity if the student's weak-area signal shifts mid-week from further practice - same reasoning
+the old single-day plan used, now over a real horizon tied to the exam countdown. Regenerated early if
+the student's exam_date/stream/subjects_selected actually changed (see _stable_keys/_is_stale below),
+not just because time has passed.
+
+All the actual data-gathering and scheduling math live in studyplan/profile.py (deterministic profile:
+exam countdown, curriculum coverage, weak areas - all reused from existing queries) and
+studyplan/planner.py (deterministic day-by-day allocation); studyplan/coach.py makes the one LLM call in
+this feature, to explain/motivate an already-decided schedule, never to choose it. See
+docs/dev_plans/rigorous_study_planner.md for the full design and the alternatives considered."""
 
 import datetime
 
 from auth.dependencies import get_current_user
 from db.models import User
-from db.models_practice import QuizQuestion
-from db.models_studyplan import StudyPlanDay
+from db.models_studyplan import StudyPlanWeek
 from db.session import get_db
-from exams.models import EsslcePaper
-from exams.store import recommend_focus, student_progress
 from fastapi import APIRouter, Depends, HTTPException
-from practice.progress import weakest_unit_across_subjects
+from llm.client import LLMClient
 from sqlalchemy.orm import Session
-from studyplan.plan import TaskCandidate, build_plan
+from studyplan.coach import add_rationale
+from studyplan.planner import build_week_plan
+from studyplan.profile import build_profile
 
 router = APIRouter(prefix="/v1/study-plan", tags=["study-plan"])
 
-DEFAULT_GOAL_MINUTES = 60
+
+def _stable_keys(user: User) -> dict:
+    """The only parts of a student's profile that justify throwing away a week's plan early - a new
+    weak-area signal from further practice does NOT (see this module's own docstring); an actual
+    change to the exam date, stream, or subject list does, since the existing plan may no longer even
+    cover the right subjects."""
+    return {
+        "exam_date": user.exam_date.isoformat() if user.exam_date else None,
+        "stream": user.stream,
+        "subjects_selected": sorted(user.subjects_selected or []),
+    }
 
 
-def _practice_subjects(db: Session, user: User) -> list[str]:
-    if user.subjects_selected:
-        return user.subjects_selected
-    if not user.grade_level:
-        return []
-    rows = (
-        db.query(QuizQuestion.subject)
-        .filter(QuizQuestion.grade == user.grade_level, QuizQuestion.status == "active")
-        .distinct()
-        .all()
-    )
-    return [r[0] for r in rows]
-
-
-def _esslce_subjects(db: Session, user: User) -> list[str]:
-    if user.subjects_selected:
-        return user.subjects_selected
-    return [r[0] for r in db.query(EsslcePaper.subject).distinct().all()]
-
-
-def _gather_candidates(db: Session, user: User) -> list[TaskCandidate]:
-    candidates: list[TaskCandidate] = []
-
-    if user.grade_level:
-        practice_subjects = _practice_subjects(db, user)
-        weak = weakest_unit_across_subjects(db, user.id, user.grade_level, practice_subjects)
-        if weak:
-            subject, unit, _accuracy = weak
-            candidates.append(TaskCandidate(kind="practice", label=f"Practice {unit}", subject=subject, unit=unit))
-        elif practice_subjects:
-            s = practice_subjects[0]
-            candidates.append(
-                TaskCandidate(kind="practice", label=f"Practice {s.replace('_', ' ').title()}", subject=s)
-            )
-
-    esslce_subjects = _esslce_subjects(db, user)
-    best: tuple[str, dict] | None = None
-    for subject in esslce_subjects:
-        rec = recommend_focus(student_progress(db, user.id, subject))
-        if rec and (best is None or rec["accuracy"] < best[1]["accuracy"]):
-            best = (subject, rec)
-    if best:
-        subject, rec = best
-        if rec["kind"] == "unit":
-            candidates.append(
-                TaskCandidate(kind="esslce", label=f"ESSLCE: {rec['unit']}", subject=subject, unit=rec["unit"])
-            )
-        else:
-            candidates.append(
-                TaskCandidate(kind="esslce", label=f"ESSLCE: {rec['skill']}", subject=subject, skill=rec["skill"])
-            )
-    elif esslce_subjects:
-        s = esslce_subjects[0]
-        candidates.append(
-            TaskCandidate(kind="esslce", label=f"ESSLCE {s.replace('_', ' ').title()} practice", subject=s)
-        )
-
-    candidates.append(TaskCandidate(kind="ask", label="Ask a question about anything you're stuck on"))
-    return candidates
-
-
-def _get_or_create_today(db: Session, user: User) -> StudyPlanDay:
-    plan_date = datetime.date.today()
+def _get_or_create_week(db: Session, user: User) -> StudyPlanWeek:
+    today = datetime.date.today()
+    current_keys = _stable_keys(user)
     row = (
-        db.query(StudyPlanDay)
-        .filter(StudyPlanDay.user_id == user.id, StudyPlanDay.plan_date == plan_date)
-        .one_or_none()
+        db.query(StudyPlanWeek)
+        .filter(StudyPlanWeek.user_id == user.id)
+        .order_by(StudyPlanWeek.week_start_date.desc())
+        .first()
     )
-    if row is None:
-        goal = user.daily_goal_minutes or DEFAULT_GOAL_MINUTES
-        tasks = build_plan(goal, _gather_candidates(db, user))
-        row = StudyPlanDay(user_id=user.id, plan_date=plan_date, tasks=tasks)
-        db.add(row)
-        db.commit()
-        db.refresh(row)
+    if row is not None:
+        window_end = row.week_start_date + datetime.timedelta(days=len(row.days) - 1)
+        stale = row.profile_snapshot.get("_stable_keys") != current_keys
+        if row.week_start_date <= today <= window_end and not stale:
+            return row
+
+    profile = build_profile(db, user)
+    profile["_stable_keys"] = current_keys
+    week_plan = build_week_plan(profile)
+    week_plan = add_rationale(LLMClient(temperature=0.3, max_tokens=900), week_plan, profile)
+
+    row = StudyPlanWeek(
+        user_id=user.id,
+        week_start_date=today,
+        days=week_plan["days"],
+        day_rationales=week_plan["day_rationales"],
+        weekly_note=week_plan["weekly_note"],
+        realistic=week_plan["realistic"],
+        shortfall_minutes=week_plan["shortfall_minutes"],
+        profile_snapshot=profile,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
     return row
 
 
-@router.get("/today")
-def today(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    row = _get_or_create_today(db, user)
-    return {"plan_date": row.plan_date.isoformat(), "tasks": row.tasks}
+def _serialize(row: StudyPlanWeek) -> dict:
+    snapshot = row.profile_snapshot
+    return {
+        "week_start_date": row.week_start_date.isoformat(),
+        "days_remaining": snapshot.get("days_remaining"),
+        "realistic": row.realistic,
+        "shortfall_minutes": row.shortfall_minutes,
+        "missing_subjects": snapshot.get("missing_subjects", []),
+        "coverage": {s["subject"]: s["coverage_ratio"] for s in snapshot.get("subjects", [])},
+        "weekly_note": row.weekly_note,
+        "days": [
+            {
+                "date": (row.week_start_date + datetime.timedelta(days=i)).isoformat(),
+                "rationale": row.day_rationales[i] if i < len(row.day_rationales) else "",
+                "tasks": tasks,
+            }
+            for i, tasks in enumerate(row.days)
+        ],
+    }
 
 
-@router.post("/today/tasks/{index}/done")
+@router.get("/week")
+def week(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    return _serialize(_get_or_create_week(db, user))
+
+
+@router.post("/week/days/{day_index}/tasks/{task_index}/done")
 def mark_done(
-    index: int,
+    day_index: int,
+    task_index: int,
     done: bool = True,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    row = _get_or_create_today(db, user)
-    if index < 0 or index >= len(row.tasks):
-        raise HTTPException(status_code=404, detail="No such task in today's plan.")
-    tasks = list(row.tasks)
-    tasks[index] = {**tasks[index], "done": done}
-    row.tasks = tasks  # reassign (not mutate in place) so SQLAlchemy marks the JSON column dirty
+    row = _get_or_create_week(db, user)
+    if day_index < 0 or day_index >= len(row.days):
+        raise HTTPException(status_code=404, detail="No such day in this week's plan.")
+    day_tasks = row.days[day_index]
+    if task_index < 0 or task_index >= len(day_tasks):
+        raise HTTPException(status_code=404, detail="No such task in that day's plan.")
+
+    days = [list(d) for d in row.days]
+    days[day_index][task_index] = {**days[day_index][task_index], "done": done}
+    row.days = days  # reassign (not mutate in place) so SQLAlchemy marks the JSON column dirty
     db.commit()
-    return {"plan_date": row.plan_date.isoformat(), "tasks": row.tasks}
+    db.refresh(row)
+    return _serialize(row)

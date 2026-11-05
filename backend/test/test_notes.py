@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import types
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -131,7 +132,8 @@ def _db():
 app = FastAPI()
 app.include_router(R.router)
 app.dependency_overrides[R.get_db] = _db
-app.dependency_overrides[R.get_current_user] = lambda: None
+fake_user = types.SimpleNamespace(id=uuid.uuid4())  # routes_notes.py now records a per-user note view
+app.dependency_overrides[R.get_current_user] = lambda: fake_user
 c = TestClient(app)
 
 

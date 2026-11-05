@@ -24,6 +24,7 @@ import { EsslceSummaryPage } from "./pages/esslce/EsslceSummary"
 import { CreditsPage } from "./pages/payments/CreditsPage"
 import { BuyPage } from "./pages/payments/BuyPage"
 import { ProfilePage } from "./pages/Profile"
+import { StudyPlanPage } from "./pages/studyplan/StudyPlanPage"
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -116,6 +117,7 @@ export default function App() {
         <Route path="/credits/buy" element={<BuyPage />} />
 
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/study-plan" element={<StudyPlanPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

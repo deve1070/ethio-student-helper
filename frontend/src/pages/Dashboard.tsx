@@ -1,57 +1,56 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import {
-  BookOpenCheck,
-  BookText,
-  Calendar,
-  Check,
-  GraduationCap,
-  MessageCircleQuestion,
-  Sparkles,
-} from "lucide-react"
+import { BookOpenCheck, BookText, Calendar, GraduationCap, MessageCircleQuestion, Sparkles } from "lucide-react"
 import { Card, CardButton } from "../components/ui/Card"
 import { Spinner } from "../components/ui/Primitives"
+import { StudyPlanTaskRow } from "../components/ui/StudyPlanTaskRow"
 import { useAuth } from "../lib/auth"
-import { studyPlan, type StudyPlanTask } from "../lib/api"
+import { studyPlan, type StudyPlanResponse, type StudyPlanTask } from "../lib/api"
+import { taskHref, todayIso } from "../lib/studyPlanTasks"
 
 function daysUntil(dateStr: string): number {
   const ms = new Date(dateStr + "T00:00:00").getTime() - new Date().setHours(0, 0, 0, 0)
   return Math.round(ms / 86_400_000)
 }
 
-function taskHref(subject: string | null, t: StudyPlanTask): string {
-  if (t.kind === "ask") return "/explain"
-  if (t.kind === "practice" && subject) {
-    return t.unit ? `/practice/${encodeURIComponent(subject)}/session?units=${encodeURIComponent(t.unit)}` : `/practice/${encodeURIComponent(subject)}`
-  }
-  if (t.kind === "esslce" && subject) {
-    const params = new URLSearchParams({ mode: "practice" })
-    if (t.unit) params.set("unit", t.unit)
-    else if (t.skill) params.set("skill", t.skill)
-    return t.unit || t.skill ? `/esslce/${encodeURIComponent(subject)}/session?${params.toString()}` : `/esslce/${encodeURIComponent(subject)}`
-  }
-  return "/"
-}
-
 export function DashboardPage() {
   const navigate = useNavigate()
   const { gradeLevel, fullProfile } = useAuth()
-  const [plan, setPlan] = useState<StudyPlanTask[] | null>(null)
+  const [week, setWeek] = useState<StudyPlanResponse | null | undefined>(undefined)
 
   useEffect(() => {
     studyPlan
-      .today()
-      .then((r) => setPlan(r.tasks))
-      .catch(() => setPlan([])) // non-critical - the rest of the dashboard still works without it
+      .week()
+      .then(setWeek)
+      .catch(() => setWeek(null)) // non-critical - the rest of the dashboard still works without it
   }, [])
 
-  async function toggleTask(index: number, task: StudyPlanTask) {
+  // the week's plan is keyed by calendar date, not array position - today is usually days[0] (a fresh
+  // plan starts on the day it's generated), but can drift if the student opens the app after a gap
+  const dayIndex = week ? week.days.findIndex((d) => d.date === todayIso()) : -1
+  const today = dayIndex >= 0 ? week!.days[dayIndex] : null
+  const plan = today?.tasks ?? null
+  const loading = week === undefined
+
+  async function toggleTask(taskIndex: number, task: StudyPlanTask) {
     const next = !task.done
-    setPlan((cur) => (cur ? cur.map((t, i) => (i === index ? { ...t, done: next } : t)) : cur))
+    setWeek((cur) => {
+      if (!cur) return cur
+      const days = cur.days.map((d, i) =>
+        i === dayIndex ? { ...d, tasks: d.tasks.map((t, j) => (j === taskIndex ? { ...t, done: next } : t)) } : d,
+      )
+      return { ...cur, days }
+    })
     try {
-      await studyPlan.markDone(index, next)
+      await studyPlan.markDone(dayIndex, taskIndex, next)
     } catch {
-      setPlan((cur) => (cur ? cur.map((t, i) => (i === index ? { ...t, done: !next } : t)) : cur)) // revert on failure
+      setWeek((cur) => {
+        if (!cur) return cur
+        const days = cur.days.map((d, i) =>
+          i === dayIndex ? { ...d, tasks: d.tasks.map((t, j) => (j === taskIndex ? { ...t, done: !next } : t)) } : d,
+        )
+        return { ...cur, days }
+      }) // revert on failure
     }
   }
 
@@ -105,45 +104,28 @@ export function DashboardPage() {
       )}
 
       <Card className="flex flex-col gap-3 p-4">
-        <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900">
-          <Sparkles className="size-4 text-brand-600" aria-hidden /> Today's study plan
-        </p>
-        {plan === null ? (
+        <div className="flex items-center justify-between">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900">
+            <Sparkles className="size-4 text-brand-600" aria-hidden /> Today's study plan
+          </p>
+          {week && <button onClick={() => navigate("/study-plan")} className="text-xs font-medium text-brand-600">View full week</button>}
+        </div>
+        {loading ? (
           <div className="flex justify-center py-4">
             <Spinner />
           </div>
-        ) : plan.length === 0 ? (
-          <p className="text-sm text-zinc-500">Answer a few questions to get a personalized plan here.</p>
+        ) : !plan ? (
+          <p className="text-sm text-zinc-500">Set up your profile to get a personalized plan here.</p>
         ) : (
           <div className="flex flex-col gap-2">
+            {today?.rationale && <p className="text-xs text-zinc-500">{today.rationale}</p>}
+            {week && !week.realistic && (
+              <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                There isn't quite enough time to cover everything before your exam - this plan prioritizes what's tested most.
+              </p>
+            )}
             {plan.map((t, i) => (
-              <div
-                key={i}
-                className={
-                  "flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors " +
-                  (t.done ? "border-zinc-100 bg-zinc-50" : "border-zinc-200 bg-white")
-                }
-              >
-                <button
-                  onClick={() => toggleTask(i, t)}
-                  aria-label={t.done ? "Mark not done" : "Mark done"}
-                  className={
-                    "flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors " +
-                    (t.done ? "border-brand-600 bg-brand-600 text-white" : "border-zinc-300")
-                  }
-                >
-                  {t.done && <Check className="size-3.5" aria-hidden />}
-                </button>
-                <button
-                  onClick={() => navigate(taskHref(t.subject, t))}
-                  className="flex-1 text-left"
-                >
-                  <p className={"text-sm font-medium " + (t.done ? "text-zinc-400 line-through" : "text-zinc-900")}>
-                    {t.label}
-                  </p>
-                  {t.minutes !== null && <p className="text-xs text-zinc-500">{t.minutes} min</p>}
-                </button>
-              </div>
+              <StudyPlanTaskRow key={i} task={t} onToggle={() => toggleTask(i, t)} onOpen={() => navigate(taskHref(t.subject, t))} />
             ))}
           </div>
         )}

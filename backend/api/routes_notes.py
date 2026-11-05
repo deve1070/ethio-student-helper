@@ -14,7 +14,7 @@ from db.session import get_db
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from llm.client import LLMClient
-from notes.store import available_subjects, available_units, get_or_create_note
+from notes.store import available_subjects, available_units, get_or_create_note, record_note_view
 from pydantic import BaseModel
 from retriever.builder import RetrieverBuilder
 from retriever import vectorstore
@@ -65,7 +65,7 @@ class NoteResponse(BaseModel):
     is_calculation: bool
 
 
-def _note_events(grade: int, subject: str, unit: str, db: Session):
+def _note_events(grade: int, subject: str, unit: str, db: Session, user: User):
     """Generator of SSE-formatted strings for the /note stream below. get_or_create_note
     reports its progress through a plain callback (notes/store.py keeps that convention
     rather than becoming a generator itself, since test/test_notes.py and any other
@@ -103,6 +103,7 @@ def _note_events(grade: int, subject: str, unit: str, db: Session):
         yield format_sse_event({"done": True, "error": "Could not generate grounded study notes for this topic yet."})
         return
 
+    record_note_view(db, user.id, grade, subject, unit)
     yield format_sse_event({
         "done": True,
         **NoteResponse(
@@ -127,4 +128,4 @@ def note(
     # this needs more than a single-question elaboration's budget - but this account's Groq tier hard-caps
     # a whole request (input + this reservation) at 8000 tokens, so it can't just be pushed arbitrarily
     # higher; notes.store.MAX_CONTEXT_CHARS caps the input side to leave this room safely under that.
-    return StreamingResponse(_note_events(grade, subject, unit, db), media_type="text/event-stream")
+    return StreamingResponse(_note_events(grade, subject, unit, db, user), media_type="text/event-stream")

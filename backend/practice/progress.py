@@ -43,15 +43,26 @@ def attempt_timestamps(db: Session, user_id, grade: int, subject: str):
     )
 
 
+def weak_units_across_subjects(
+    db: Session, user_id, grade: int, subjects: list[str]
+) -> list[tuple[str, str, float]]:
+    """Every (subject, unit) this student has enough attempts on to call "weak" with any confidence,
+    across every subject given - weakest first. Used by studyplan/profile.py, which needs the FULL
+    set of weak spots to spread a multi-day plan across, not just the single worst one."""
+    out: list[tuple[str, str, float]] = []
+    for subject in subjects:
+        for u in unit_progress(attempt_rows(db, user_id, grade, subject)):
+            if u["level"] == "weak":
+                out.append((subject, u["unit"], u["accuracy"]))
+    out.sort(key=lambda row: row[2])
+    return out
+
+
 def weakest_unit_across_subjects(
     db: Session, user_id, grade: int, subjects: list[str]
 ) -> tuple[str, str, float] | None:
     """The single weakest (subject, unit) this student has enough attempts on to call "weak" with any
     confidence, across every subject given - or None if nothing has reached that bar yet (a brand new
     student, or one who's only ever gotten things right)."""
-    best: tuple[str, str, float] | None = None
-    for subject in subjects:
-        for u in unit_progress(attempt_rows(db, user_id, grade, subject)):
-            if u["level"] == "weak" and (best is None or u["accuracy"] < best[2]):
-                best = (subject, u["unit"], u["accuracy"])
-    return best
+    weak = weak_units_across_subjects(db, user_id, grade, subjects)
+    return weak[0] if weak else None
