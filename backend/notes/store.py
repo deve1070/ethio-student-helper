@@ -20,7 +20,7 @@ from practice.validate import quote_in_passage
 from retriever.citation import citation_for
 from utils.units import unit_sort_key
 
-from .models import StudyNote
+from .models import StudyNote, StudyNoteView
 
 UNIT_RETRIEVAL_K = 40  # generous enough to cover a whole unit's real content (seen up to ~80 chunks) -
 # MAX_CONTEXT_CHARS below is what actually keeps the prompt within budget, since chunk length varies a
@@ -508,3 +508,33 @@ def get_or_create_note(
     db.add(row)
     db.commit()
     return row
+
+
+def record_note_view(db, user_id, grade: int, subject: str, unit: str) -> None:
+    """Records that this student has opened this unit's note - idempotent, so a repeat visit is a no-op
+    rather than a growing log. See notes.models.StudyNoteView for why this exists (the global StudyNote
+    cache above has no per-student signal on its own)."""
+    existing = (
+        db.query(StudyNoteView)
+        .filter(
+            StudyNoteView.user_id == user_id,
+            StudyNoteView.grade == grade,
+            StudyNoteView.subject == subject,
+            StudyNoteView.unit == unit,
+        )
+        .one_or_none()
+    )
+    if existing is None:
+        db.add(StudyNoteView(user_id=user_id, grade=grade, subject=subject, unit=unit))
+        db.commit()
+
+
+def viewed_units(db, user_id, subject: str) -> set[tuple[int, str]]:
+    """{(grade, unit)} this student has opened the Study Note for, in this subject - one half of
+    studyplan/profile.py's curriculum-coverage signal (the other half is practice/ESSLCE attempt history)."""
+    rows = (
+        db.query(StudyNoteView.grade, StudyNoteView.unit)
+        .filter(StudyNoteView.user_id == user_id, StudyNoteView.subject == subject)
+        .all()
+    )
+    return {(g, u) for g, u in rows}

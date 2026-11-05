@@ -1099,35 +1099,74 @@ def best_unit(q: EsslceQuestion):
 def unit_stats(db, subject: str | None = None) -> list:
     """Deterministic (no LLM) per-(subject, grade, unit) question counts across every loaded paper, using
     best_unit(q) - the same attribution reviewers and index_questions already use - to attribute each question
-    to a unit. Surfaces which units are most heavily tested; this is a count, not a ranking decision."""
-    q = db.query(EsslcePaper)
+    to a unit. Surfaces which units are most heavily tested; this is a count, not a ranking decision.
+
+    Queries only the columns best_unit()/this function actually read (each question's topic links, review
+    status, subject/year) via a SQL filter and an inner join to EsslceTopicLink, not full EsslceQuestion
+    ORM objects - same N+1 full-materialization bug already fixed in eligible_units()/
+    eligible_skill_strands()/diagnostic_questions() (this file): the old `for question in paper.questions`
+    loop materialized every question (stem/options/explanation/verification_code and all) of every loaded
+    paper just to count them, which was enough to OOM-kill the single worker on a large subject. This
+    function is now also called by studyplan/planner.py once per plan generation, a second caller that
+    would otherwise hit the exact same wall."""
+    link_rows = (
+        db.query(
+            EsslceQuestion.id,
+            EsslcePaper.subject,
+            EsslcePaper.year_ec,
+            EsslceQuestion.review_status,
+            EsslceTopicLink.grade,
+            EsslceTopicLink.unit,
+            EsslceTopicLink.verified,
+            EsslceTopicLink.score,
+            EsslceTopicLink.rank,
+        )
+        .join(EsslcePaper, EsslceQuestion.paper_id == EsslcePaper.id)
+        .join(EsslceTopicLink, EsslceTopicLink.question_id == EsslceQuestion.id)
+        # best_unit()'s own subject short-circuit, pulled into the query: English/SAT are organized by
+        # skill strand, never by textbook chapter, even though the generic embedding-based chapter-linker
+        # has still produced (unused) topic links for some of their questions.
+        .filter(~EsslcePaper.subject.in_(ESSLCE_SKILL_STRAND_SUBJECTS))
+    )
     if subject:
-        q = q.filter(EsslcePaper.subject == subject)
+        link_rows = link_rows.filter(EsslcePaper.subject == subject)
+
+    by_question: dict[int, dict] = {}
+    for qid, q_subject, year_ec, review_status, grade, unit, verified, score, rank in link_rows.all():
+        info = by_question.setdefault(
+            qid, {"subject": q_subject, "year_ec": year_ec, "review_status": review_status, "links": []}
+        )
+        info["links"].append(
+            SimpleNamespace(grade=grade, unit=unit, verified=verified, score=score, rank=rank)
+        )
+
     rows: dict = {}
-    for paper in q.all():
-        for question in paper.questions:
-            unit_info = best_unit(question)
-            if unit_info is None:
-                continue
-            grade, unit, verified = unit_info
-            key = (paper.subject, grade, unit)
-            row = rows.setdefault(
-                key,
-                {
-                    "subject": paper.subject,
-                    "grade": grade,
-                    "unit": unit,
-                    "all_count": 0,
-                    "approved_count": 0,
-                    "years": set(),
-                    "verified": False,
-                },
-            )
-            row["all_count"] += 1
-            if question.review_status == "approved":
-                row["approved_count"] += 1
-            row["years"].add(paper.year_ec)
-            row["verified"] = row["verified"] or verified
+    for info in by_question.values():
+        links = sorted(
+            info["links"],
+            key=lambda l: (not l.verified, l.score if l.score is not None else 9.0, l.rank),
+        )
+        if not links or not links[0].unit:
+            continue
+        grade, unit, verified = links[0].grade, links[0].unit, bool(links[0].verified)
+        key = (info["subject"], grade, unit)
+        row = rows.setdefault(
+            key,
+            {
+                "subject": info["subject"],
+                "grade": grade,
+                "unit": unit,
+                "all_count": 0,
+                "approved_count": 0,
+                "years": set(),
+                "verified": False,
+            },
+        )
+        row["all_count"] += 1
+        if info["review_status"] == "approved":
+            row["approved_count"] += 1
+        row["years"].add(info["year_ec"])
+        row["verified"] = row["verified"] or verified
     out = [{**row, "years": sorted(row["years"])} for row in rows.values()]
     out.sort(key=lambda r: r["all_count"], reverse=True)
     return out

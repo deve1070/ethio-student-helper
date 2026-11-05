@@ -364,7 +364,7 @@ export const progress = {
 
 // ---------------------------------------------------------------- study plan (cross-system)
 export interface StudyPlanTask {
-  kind: "practice" | "esslce" | "mistakes" | "ask"
+  kind: "notes" | "practice" | "esslce" | "ask"
   label: string
   subject: string | null
   unit: string | null
@@ -372,14 +372,25 @@ export interface StudyPlanTask {
   minutes: number | null
   done: boolean
 }
-export interface StudyPlanResponse {
-  plan_date: string
+export interface StudyPlanDay {
+  date: string
+  rationale: string
   tasks: StudyPlanTask[]
 }
+export interface StudyPlanResponse {
+  week_start_date: string
+  days_remaining: number | null
+  realistic: boolean
+  shortfall_minutes: number
+  missing_subjects: string[]
+  coverage: Record<string, number | null>
+  weekly_note: string
+  days: StudyPlanDay[]
+}
 export const studyPlan = {
-  today: () => get<StudyPlanResponse>("/v1/study-plan/today"),
-  markDone: (index: number, done: boolean) =>
-    post<StudyPlanResponse>(`/v1/study-plan/today/tasks/${index}/done?done=${done}`),
+  week: () => get<StudyPlanResponse>("/v1/study-plan/week"),
+  markDone: (dayIndex: number, taskIndex: number, done: boolean) =>
+    post<StudyPlanResponse>(`/v1/study-plan/week/days/${dayIndex}/tasks/${taskIndex}/done?done=${done}`),
 }
 
 // ---------------------------------------------------------------- study notes
