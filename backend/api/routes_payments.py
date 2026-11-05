@@ -13,6 +13,7 @@ from db.session import get_db
 from llm.vision import make_gemini_vision_call
 from payments.admin_notify import notify_admins_pending_payment
 from payments.entitlement import get_credit_balance, has_active_subscription
+from payments.referral import credit_referral_if_first_payment
 from payments.receipt_verification import (
     RECEIPT_MODEL_ID,
     RECEIPT_PROMPT,
@@ -87,6 +88,7 @@ def submit_receipt(
         payment.verification_note = note
         payment.completed_at = datetime.now(timezone.utc)
         db.add(CreditLedgerEntry(user_id=user.id, delta=payment.credits_granted, reason="purchase"))
+        credit_referral_if_first_payment(db, payment)
         db.commit()
         logger.info(f"Payment {payment.id} auto-approved: {note}")
         return SubmitReceiptResponse(
@@ -173,6 +175,7 @@ def approve_payment(
     payment.reviewed_by = admin.id
     payment.completed_at = datetime.now(timezone.utc)
     db.add(CreditLedgerEntry(user_id=payment.user_id, delta=payment.credits_granted, reason="purchase"))
+    credit_referral_if_first_payment(db, payment)
     db.commit()
     logger.info(f"Payment {payment.id} manually approved by admin {admin.id}")
     return ReviewResponse(payment_id=payment.id, status="completed")

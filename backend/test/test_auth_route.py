@@ -112,6 +112,93 @@ r = c.patch("/v1/auth/me", json={"exam_date": "2026-11-30", "daily_goal_minutes"
 b = r.json()
 assert r.status_code == 200 and b["exam_date"] == "2026-11-30" and b["daily_goal_minutes"] == 60
 
+# ---- 3d. referral codes: every signup gets one; an optional code at signup links the two accounts ----
+assert len(b["referral_code"]) == 8 and b["referral_code"].isupper() and b["referral_paid_count"] == 0
+
+r = c.post("/v1/auth/signup", json={"email": "carol@example.com", "password": "longenough123"})
+assert r.status_code == 200, r.text
+carol_token, carol_id = r.json()["access_token"], r.json()["user_id"]
+carol_code = c.get("/v1/auth/me", headers={"Authorization": f"Bearer {carol_token}"}).json()["referral_code"]
+
+r = c.post(
+    "/v1/auth/signup",
+    json={"email": "dave@example.com", "password": "longenough123", "referral_code": carol_code},
+)
+assert r.status_code == 200, r.text
+
+# an unknown code blocks signup outright - no account is created
+r = c.post(
+    "/v1/auth/signup",
+    json={"email": "erin@example.com", "password": "longenough123", "referral_code": "NOTREAL1"},
+)
+assert r.status_code == 400 and "referral code" in r.json()["detail"].lower(), r.text
+
+db2 = Session()
+assert db2.query(M.User).filter(M.User.email == "erin@example.com").one_or_none() is None
+dave = db2.query(M.User).filter(M.User.email == "dave@example.com").one()
+assert str(dave.referred_by_user_id) == carol_id, (dave.referred_by_user_id, carol_id)
+
+# ---- 3e. password reset via Telegram: only works for a student with a linked account (alice, from
+# section 3) - the Telegram push itself is stubbed (no real network call), capturing whatever 6-digit
+# code the real endpoint generated so this test uses the REAL code rather than a hardcoded one --------
+import re as _re
+
+sent_codes: dict[str, str] = {}
+
+
+def _fake_send_text(db, user, text):
+    # Mirrors auth/telegram_notify.py's own "no linked chat -> nothing sent" check (the real reason
+    # to stub is only to avoid a live network call to Telegram, not to skip that check).
+    if db.query(M.TelegramLink).filter(M.TelegramLink.user_id == user.id).first() is None:
+        return False
+    m = _re.search(r"\b(\d{6})\b", text)
+    sent_codes[str(user.id)] = m.group(1) if m else None
+    return True
+
+
+R.send_text = _fake_send_text
+
+r = c.post("/v1/auth/password-reset/request", json={"identifier": "alice@example.com"})
+assert r.status_code == 200 and r.json()["status"] == "code_sent", r.text
+alice = db2.query(M.User).filter(M.User.email == "alice@example.com").one()
+code = sent_codes[str(alice.id)]
+assert code and len(code) == 6, sent_codes
+
+r = c.post(
+    "/v1/auth/password-reset/confirm",
+    json={"identifier": "alice@example.com", "code": "000000", "new_password": "newlongpassword1"},
+)
+assert r.status_code == 401, r.text  # wrong code
+
+r = c.post(
+    "/v1/auth/password-reset/confirm",
+    json={"identifier": "alice@example.com", "code": code, "new_password": "newlongpassword1"},
+)
+assert r.status_code == 200 and r.json()["access_token"], r.text  # right code logs the student in
+
+# confirm the password actually changed - checked directly (not via /login, which has its own
+# separately-tracked rate limit the next section's exact counting depends on)
+from auth.security import verify_password
+
+db2.expire_all()
+alice = db2.query(M.User).filter(M.User.email == "alice@example.com").one()
+assert not verify_password("correcthorsebattery", alice.password_hash)  # old password no longer works
+assert verify_password("newlongpassword1", alice.password_hash)  # new password does
+
+r = c.post(
+    "/v1/auth/password-reset/confirm",
+    json={"identifier": "alice@example.com", "code": code, "new_password": "yetanotherpw2"},
+)
+assert r.status_code == 401, r.text  # single-use: the same code can't be replayed
+
+# carol has no linked Telegram account - same response as "no account at all", on purpose
+r = c.post("/v1/auth/password-reset/request", json={"identifier": "carol@example.com"})
+assert r.status_code == 200 and r.json()["status"] == "no_telegram_link", r.text
+assert carol_id not in sent_codes
+
+r = c.post("/v1/auth/password-reset/request", json={"identifier": "nosuchuser@example.com"})
+assert r.status_code == 200 and r.json()["status"] == "no_telegram_link", r.text
+
 # ---- 4. rate limiting: /login allows 5 attempts per minute per IP, then 429 (burns remaining capacity, do last) -
 # section 2 already spent 2 of the 5 (one success, one failure) - 3 more get through before 429 kicks in
 codes = []

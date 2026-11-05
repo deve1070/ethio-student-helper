@@ -80,6 +80,9 @@ export interface Profile {
   exam_date: string | null
   daily_goal_minutes: number | null
   onboarding_completed: boolean
+  referral_code: string
+  referral_paid_count: number
+  telegram_group_url: string | null
 }
 export interface UpdateProfileBody {
   grade_level?: number
@@ -88,19 +91,28 @@ export interface UpdateProfileBody {
   exam_date?: string
   daily_goal_minutes?: number
 }
+export interface PasswordResetRequestResponse {
+  status: "code_sent" | "no_telegram_link"
+}
 export const auth = {
+  publicConfig: () => get<{ telegram_group_url: string | null }>("/v1/auth/public-config"),
   signup: (body: {
     phone_number?: string
     email?: string
     password: string
     full_name?: string
     grade_level?: number
+    referral_code?: string
   }) => post<TokenResponse>("/v1/auth/signup", body),
   login: (identifier: string, password: string) =>
     post<TokenResponse>("/v1/auth/login", { identifier, password }),
   streams: () => get<StreamSubjects>("/v1/auth/streams"),
   me: () => get<Profile>("/v1/auth/me"),
   updateMe: (body: UpdateProfileBody) => patch<Profile>("/v1/auth/me", body),
+  requestPasswordReset: (identifier: string) =>
+    post<PasswordResetRequestResponse>("/v1/auth/password-reset/request", { identifier }),
+  confirmPasswordReset: (identifier: string, code: string, new_password: string) =>
+    post<TokenResponse>("/v1/auth/password-reset/confirm", { identifier, code, new_password }),
 }
 
 // ---------------------------------------------------------------- explain

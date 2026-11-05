@@ -15,6 +15,7 @@ export function SignupPage() {
   const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [grade, setGrade] = useState(12)
+  const [referralCode, setReferralCode] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -30,6 +31,7 @@ export function SignupPage() {
         phone_number: isEmail ? undefined : identifier,
         password,
         grade_level: grade,
+        referral_code: referralCode.trim() || undefined,
       })
       navigate("/", { replace: true })
     } catch (err) {
@@ -95,6 +97,14 @@ export function SignupPage() {
                 </button>
               ))}
             </div>
+          </Field>
+          <Field label="Referral code (optional)" htmlFor="referralCode">
+            <TextInput
+              id="referralCode"
+              value={referralCode}
+              onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+              placeholder="e.g. 7K3PQRXM"
+            />
           </Field>
           <Button type="submit" size="lg" fullWidth loading={loading}>
             Create account

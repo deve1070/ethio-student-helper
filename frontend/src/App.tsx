@@ -4,6 +4,7 @@ import { FullPageSpinner } from "./components/ui/Primitives"
 import { useAuth } from "./lib/auth"
 import { LoginPage } from "./pages/auth/Login"
 import { SignupPage } from "./pages/auth/Signup"
+import { ForgotPasswordPage } from "./pages/auth/ForgotPassword"
 import { OnboardingPage } from "./pages/onboarding/OnboardingPage"
 import { DashboardPage } from "./pages/Dashboard"
 import { ExplainPage } from "./pages/explain/ExplainPage"
@@ -69,6 +70,14 @@ export default function App() {
         element={
           <RedirectIfAuthed>
             <SignupPage />
+          </RedirectIfAuthed>
+        }
+      />
+      <Route
+        path="/forgot-password"
+        element={
+          <RedirectIfAuthed>
+            <ForgotPasswordPage />
           </RedirectIfAuthed>
         }
       />

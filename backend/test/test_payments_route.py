@@ -22,6 +22,12 @@ stub("auth")
 stub("auth.dependencies", get_current_user=lambda: None, require_admin=lambda: None)
 stub("db.session", get_db=lambda: None)
 
+# payments/referral.py pushes a best-effort Telegram notification to the referrer - stub it the same
+# way as every other network-touching boundary in this test file; referral_sent captures the calls so
+# the test can assert on them without a real network call.
+referral_sent: list = []
+stub("auth.telegram_notify", send_text=lambda db, user, text: referral_sent.append((user.id, text)) or True)
+
 # routes_payments.py builds a Gemini vision call at request time and pushes an admin notification
 # over httpx - stub both so the test suite never touches a real API key or the network.
 vision_state = {"response": json.dumps({"readable": False, "amount_etb": None, "transaction_id": None})}
@@ -173,6 +179,42 @@ check("none pending after rejecting the last one", len(r.json()) == 0)
 r = c.get("/v1/me/credits")
 check("me/credits 200", r.status_code == 200)
 check("me/credits balance 25", r.json()["balance"] == 25)
+
+# ---- referral count: increments by exactly 1 on the referred student's FIRST completed payment,
+# never again on a later one - covering both the auto-approve and manual-approve completion paths ----
+referrer = M.User(id=uuid.uuid4(), full_name="Referrer Rae", is_admin=False)
+referred = M.User(id=uuid.uuid4(), full_name="Referred Fay", is_admin=False, referred_by_user_id=referrer.id)
+db.add_all([referrer, referred])
+db.commit()
+
+app.dependency_overrides[R.get_current_user] = lambda: referred
+vision_state["response"] = json.dumps({"readable": True, "amount_etb": 25.0, "transaction_id": "REF1"})
+r = c.post(
+    "/v1/payments/submit-receipt",
+    data={"bundle": "bundle_5", "transaction_id": "REF1"},
+    files={"receipt": ("r.jpg", b"fake", "image/jpeg")},
+)
+check("referred student's first payment auto-approved", r.json()["status"] == "completed")
+db.expire_all()
+check("referrer's count is now 1", db.get(M.User, referrer.id).referral_paid_count == 1)
+check("referrer was notified on Telegram", any(uid == referrer.id for uid, _ in referral_sent))
+
+vision_state["response"] = json.dumps({"readable": False, "amount_etb": None, "transaction_id": None})
+r = c.post(
+    "/v1/payments/submit-receipt",
+    data={"bundle": "bundle_5", "transaction_id": "REF2"},
+    files={"receipt": ("r.jpg", b"fake", "image/jpeg")},
+)
+check("referred student's second payment falls to pending first", r.json()["status"] == "pending")
+second_payment_id = r.json()["payment_id"]
+
+app.dependency_overrides[R.require_admin] = lambda: admin
+r = c.post(f"/v1/payments/{second_payment_id}/approve")
+check("referred student's second payment completes (manual path)", r.json()["status"] == "completed")
+db.expire_all()
+check("referrer's count stays at 1 (not double-counted)", db.get(M.User, referrer.id).referral_paid_count == 1)
+
+app.dependency_overrides[R.get_current_user] = lambda: student  # restore for anything added after this
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
