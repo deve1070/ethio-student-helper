@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     RECEIPTS_DIR: str = "receipts"
 
+    # The student-facing Telegram group for help/info (api/routes_auth.py surfaces this through
+    # ProfileResponse; telegram_bot/bot.py's /help reads the same value from this shared .env) —
+    # empty until the group actually exists, in which case the frontend hides the link entirely
+    # rather than show a dead one.
+    TELEGRAM_GROUP_URL: str = ""
+
     # Auth — JWT_SECRET_KEY MUST be overridden via environment in any
     # real deployment; this default is only safe for local dev
     JWT_SECRET_KEY: str = "dev-only-change-me"
@@ -51,6 +57,11 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = (
         60 * 24 * 14
     )  # 2 weeks — students shouldn't have to re-login often
+
+    # Password reset via Telegram (api/routes_auth.py, db.models.PasswordResetCode) — short enough
+    # that a code intercepted later is useless, long enough that a student has time to switch from
+    # Telegram back to the browser and type it in.
+    PASSWORD_RESET_CODE_EXPIRE_MINUTES: int = 10
 
     # Retrieval settings
     VECTOR_SEARCH_K: int = 10

@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import date, datetime
 
@@ -22,6 +23,18 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     pass
+
+
+# Same unambiguous alphabet as auth/referral.py's generate_referral_code. This Python-side column
+# default (not a DB-side one, same pattern as User.id below) only ever fires when a User is
+# constructed WITHOUT an explicit referral_code - the real signup route (api/routes_auth.py) always
+# passes generate_referral_code(db)'s own DB-collision-checked value instead, since that function (not
+# this one) is the one source of truth that checks uniqueness before handing out a code. This default
+# exists so the many test fixtures and scripts across this project that construct User(...) directly
+# don't all need to learn about referral codes just to satisfy the NOT NULL constraint.
+def _unchecked_referral_code() -> str:
+    alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+    return "".join(secrets.choice(alphabet) for _ in range(8))
 
 
 class User(Base):
@@ -50,6 +63,18 @@ class User(Base):
     # Set the first time the onboarding wizard is finished OR explicitly skipped - distinguishes "never
     # seen it" from "chose to skip", so the app never re-nags a student who opted out on purpose.
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Referrals (see auth/referral.py): every user gets their own code at signup, generated once and
+    # never changed. referred_by_user_id is set only if a NEW user entered someone else's code at their
+    # own signup - never retroactively, and never edited afterward. referral_paid_count is a plain
+    # counter, not a derived/joined value - it only ever increments, from payments/referral.py, at the
+    # moment a referred user's FIRST payment completes (never at signup, never on a second purchase).
+    referral_code: Mapped[str] = mapped_column(
+        String(16), unique=True, nullable=False, default=_unchecked_referral_code
+    )
+    referred_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    referral_paid_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -78,6 +103,30 @@ class TelegramLink(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="telegram_link")
+
+
+class PasswordResetCode(Base):
+    """A short-lived code pushed to a student's linked Telegram chat (auth/telegram_notify.py) so they
+    can set a new password without an email/SMS provider - see auth/routes_auth.py's
+    /password-reset/request and /confirm. code_hash, never the plain code, is stored at rest - the
+    same bcrypt helpers (auth/security.py) used for real passwords, since a reset code is a short-lived
+    credential too. Append-only in practice (a new request invalidates the previous row for that user
+    rather than reusing it), same style as Payment/EsslceAttempt."""
+
+    __tablename__ = "password_reset_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    code_hash: Mapped[str] = mapped_column(String, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Device(Base):

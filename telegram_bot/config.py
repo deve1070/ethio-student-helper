@@ -9,3 +9,6 @@ load_dotenv(Path(__file__).resolve().parent.parent / "backend" / ".env")
 
 BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://localhost:8000")
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+# Same setting the backend reads for its Profile page link (config/settings.py) - empty until the
+# group actually exists.
+TELEGRAM_GROUP_URL = os.environ.get("TELEGRAM_GROUP_URL", "")

@@ -12,7 +12,7 @@ from telegram.ext import (
 
 from telegram_bot import reminders
 from telegram_bot import store as bot_store
-from telegram_bot.config import TELEGRAM_BOT_TOKEN
+from telegram_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_URL
 from telegram_bot.handlers.auth_handler import login_command, logout_command
 from telegram_bot.handlers.esslce_handler import (
     esslce_callback,
@@ -57,11 +57,23 @@ COMMANDS = [
     BotCommand("remind", "Set a daily practice reminder"),
     BotCommand("credits", "Check your credit balance"),
     BotCommand("buy", "Buy more credits"),
+    BotCommand("help", "Get help or join our student group"),
 ]
 
 # The main menu's buttons (start_command below) each just call the exact same function its
 # matching slash command already calls - menu_callback (also below) is the one place that maps
 # a button tap to that function, so adding a command here never means writing its logic twice.
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Also reachable as the main menu's "Help" button - see api/routes_auth.py's ProfileResponse,
+    which surfaces this same TELEGRAM_GROUP_URL on the app's Profile page, for the one shared place
+    this link is kept (config/settings.py / this bot's own config.py, both reading the same .env)."""
+    if TELEGRAM_GROUP_URL:
+        text = f"Need help or have a question? Join our student group:\n{TELEGRAM_GROUP_URL}"
+    else:
+        text = "Having trouble? Use /login to link your account, or ask your question with /explain."
+    await update.effective_message.reply_text(text)
+
+
 _MENU_ACTIONS = {
     "practice": practice_command,
     "progress": progress_command,
@@ -73,6 +85,7 @@ _MENU_ACTIONS = {
     "buy": buy_command,
     "login": login_command,
     "logout": logout_command,
+    "help": help_command,
 }
 
 
@@ -84,13 +97,17 @@ def _main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⏰ Reminders", callback_data="m|remind")],
         [InlineKeyboardButton("💳 My credits", callback_data="m|credits"), InlineKeyboardButton("🛒 Buy credits", callback_data="m|buy")],
         [InlineKeyboardButton("🔐 Login", callback_data="m|login"), InlineKeyboardButton("🚪 Logout", callback_data="m|logout")],
+        [InlineKeyboardButton("🆘 Help", callback_data="m|help")],
     ])
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         "Welcome to the Ethiopian Student Helper! Tap a button below, "
-        "or type / to see every command.",
+        "or type / to see every command.\n\n"
+        "Tip: run /login once even if you're already logged in on the app - it links this chat to "
+        "your account, which is also what lets you reset your password from the app later if you "
+        "ever forget it.",
         reply_markup=_main_menu(),
     )
 
@@ -145,6 +162,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("buy", buy_command))
     app.add_handler(CallbackQueryHandler(buy_callback, pattern=r"^by\|"))
     app.add_handler(CommandHandler("pending_payments", pending_payments_command))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CallbackQueryHandler(payment_review_callback, pattern=r"^PM\|"))
     app.add_handler(MessageHandler(filters.PHOTO, exam_photo_handler))
     # Different group (1, not the default 0): both this and exam_photo_handler above must see

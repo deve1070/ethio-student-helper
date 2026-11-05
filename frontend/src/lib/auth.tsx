@@ -21,7 +21,9 @@ interface AuthContextValue {
     password: string
     full_name?: string
     grade_level?: number
+    referral_code?: string
   }) => Promise<void>
+  confirmPasswordReset: (identifier: string, code: string, newPassword: string) => Promise<void>
   logout: () => void
 }
 
@@ -85,6 +87,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signup: async (body) => {
         const res = await authApi.signup(body)
         applySession(res.access_token, res.user_id, body.grade_level)
+      },
+      confirmPasswordReset: async (identifier, code, newPassword) => {
+        const res = await authApi.confirmPasswordReset(identifier, code, newPassword)
+        applySession(res.access_token, res.user_id)
       },
       logout: () => {
         setToken(null)
