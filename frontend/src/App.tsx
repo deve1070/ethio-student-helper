@@ -12,6 +12,7 @@ import { PracticeSubjectsPage } from "./pages/practice/PracticeSubjects"
 import { PracticeUnitsPage } from "./pages/practice/PracticeUnits"
 import { PracticeSessionPage } from "./pages/practice/PracticeSession"
 import { ProgressPage } from "./pages/progress/ProgressPage"
+import { LeaderboardPage } from "./pages/leaderboard/LeaderboardPage"
 import { MistakesPage } from "./pages/mistakes/MistakesPage"
 import { NotesSubjectsPage } from "./pages/notes/NotesSubjects"
 import { NotesUnitsPage } from "./pages/notes/NotesUnits"
@@ -19,6 +20,7 @@ import { NotesDetailPage } from "./pages/notes/NotesDetail"
 import { EsslceSubjectsPage } from "./pages/esslce/EsslceSubjects"
 import { EsslceModePickerPage } from "./pages/esslce/EsslceModePicker"
 import { EsslcePapersPage } from "./pages/esslce/EsslcePapers"
+import { EsslceCoverPage } from "./pages/esslce/EsslceCover"
 import { EsslceUnitsPage } from "./pages/esslce/EsslceUnits"
 import { EsslceSessionPage } from "./pages/esslce/EsslceSession"
 import { EsslceSummaryPage } from "./pages/esslce/EsslceSummary"
@@ -110,6 +112,7 @@ export default function App() {
         <Route path="/practice/:subject/session" element={<PracticeSessionPage />} />
         <Route path="/progress" element={<ProgressPage />} />
         <Route path="/mistakes" element={<MistakesPage />} />
+        <Route path="/leaderboard" element={<LeaderboardPage />} />
 
         <Route path="/notes" element={<NotesSubjectsPage />} />
         <Route path="/notes/:subject" element={<NotesUnitsPage />} />
@@ -118,12 +121,13 @@ export default function App() {
         <Route path="/esslce" element={<EsslceSubjectsPage />} />
         <Route path="/esslce/:subject" element={<EsslceModePickerPage />} />
         <Route path="/esslce/:subject/papers" element={<EsslcePapersPage />} />
+        <Route path="/esslce/:subject/start" element={<EsslceCoverPage />} />
         <Route path="/esslce/:subject/units" element={<EsslceUnitsPage />} />
         <Route path="/esslce/:subject/session" element={<EsslceSessionPage />} />
         <Route path="/esslce/:subject/summary" element={<EsslceSummaryPage />} />
 
-        <Route path="/credits" element={<CreditsPage />} />
-        <Route path="/credits/buy" element={<BuyPage />} />
+        <Route path="/subscription" element={<CreditsPage />} />
+        <Route path="/subscribe" element={<BuyPage />} />
 
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/study-plan" element={<StudyPlanPage />} />

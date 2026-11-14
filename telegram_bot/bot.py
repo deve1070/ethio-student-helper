@@ -4,16 +4,18 @@ from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Upd
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
+    ChatJoinRequestHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    PollAnswerHandler,
     filters,
 )
 
-from telegram_bot import reminders
+from telegram_bot import mass_challenge, reminders
 from telegram_bot import store as bot_store
 from telegram_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_URL
-from telegram_bot.handlers.auth_handler import login_command, logout_command
+from telegram_bot.handlers.auth_handler import login_command, login_text_handler, logout_command
 from telegram_bot.handlers.esslce_handler import (
     esslce_callback,
     esslce_command,
@@ -25,14 +27,17 @@ from telegram_bot.handlers.exam_handler import (
     exam_photo_handler,
     exam_text_handler,
 )
-from telegram_bot.handlers.explain_handler import explain_command
+from telegram_bot.handlers.explain_handler import (
+    explain_callback,
+    explain_command,
+    explain_text_handler,
+)
 from telegram_bot.handlers.payment_handler import (
-    buy_callback,
-    buy_command,
-    credits_command,
     payment_review_callback,
     pending_payments_command,
     receipt_photo_handler,
+    status_command,
+    subscribe_command,
 )
 from telegram_bot.handlers.practice_handler import (
     practice_callback,
@@ -55,8 +60,8 @@ COMMANDS = [
     BotCommand("explain", "Ask the textbook a question"),
     BotCommand("exam", "Get help with an exam question"),
     BotCommand("remind", "Set a daily practice reminder"),
-    BotCommand("credits", "Check your credit balance"),
-    BotCommand("buy", "Buy more credits"),
+    BotCommand("status", "Check your subscription status"),
+    BotCommand("subscribe", "Subscribe for a year of unlimited access"),
     BotCommand("help", "Get help or join our student group"),
 ]
 
@@ -81,8 +86,8 @@ _MENU_ACTIONS = {
     "explain": explain_command,
     "exam": exam_command,
     "remind": remind_command,
-    "credits": credits_command,
-    "buy": buy_command,
+    "status": status_command,
+    "subscribe": subscribe_command,
     "login": login_command,
     "logout": logout_command,
     "help": help_command,
@@ -95,7 +100,7 @@ def _main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎓 ESSLCE past papers", callback_data="m|esslce")],
         [InlineKeyboardButton("❓ Ask the textbook", callback_data="m|explain"), InlineKeyboardButton("📷 Exam question", callback_data="m|exam")],
         [InlineKeyboardButton("⏰ Reminders", callback_data="m|remind")],
-        [InlineKeyboardButton("💳 My credits", callback_data="m|credits"), InlineKeyboardButton("🛒 Buy credits", callback_data="m|buy")],
+        [InlineKeyboardButton("💳 My status", callback_data="m|status"), InlineKeyboardButton("🛒 Subscribe", callback_data="m|subscribe")],
         [InlineKeyboardButton("🔐 Login", callback_data="m|login"), InlineKeyboardButton("🚪 Logout", callback_data="m|logout")],
         [InlineKeyboardButton("🆘 Help", callback_data="m|help")],
     ])
@@ -140,6 +145,15 @@ async def post_init(application: Application) -> None:
     )
     logger.info("Restored %d daily reminder(s)", restored)
 
+    tz = reminders.local_tz()
+    if mass_challenge.schedule_daily_event(application.job_queue, tz):
+        logger.info("Scheduled daily mass-challenge event")
+    else:
+        logger.info("Daily mass-challenge event is OFF (TELEGRAM_PRIVATE_GROUP_ID not set)")
+    mass_challenge.schedule_headsup(application.job_queue, tz)
+    mass_challenge.schedule_sweep(application.job_queue, tz)
+    await mass_challenge.resume_after_restart(application)
+
 
 def build_application() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
@@ -156,11 +170,11 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("esslce", esslce_command))
     app.add_handler(CallbackQueryHandler(esslce_callback, pattern=r"^e[a-z]"))
     app.add_handler(CommandHandler("explain", explain_command))
+    app.add_handler(CallbackQueryHandler(explain_callback, pattern=r"^d[a-z]"))
     app.add_handler(CommandHandler("exam", exam_command))
     app.add_handler(CallbackQueryHandler(exam_callback, pattern=r"^x[a-z]"))
-    app.add_handler(CommandHandler("credits", credits_command))
-    app.add_handler(CommandHandler("buy", buy_command))
-    app.add_handler(CallbackQueryHandler(buy_callback, pattern=r"^by\|"))
+    app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("subscribe", subscribe_command))
     app.add_handler(CommandHandler("pending_payments", pending_payments_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CallbackQueryHandler(payment_review_callback, pattern=r"^PM\|"))
@@ -171,11 +185,19 @@ def build_application() -> Application:
     # match filters.PHOTO need separate groups to both get a chance to run.
     app.add_handler(MessageHandler(filters.PHOTO, receipt_photo_handler), group=1)
     # free text is only ever acted on while a student is mid-"Ask about this" chat (esslce_text_handler
-    # checks session.asking_question_id itself) or mid-guided /exam flow (exam_text_handler checks its
-    # own user_data key) - each silently ignores everything else, and (same reasoning as the two photo
-    # handlers above) both need to see every text update, hence the separate group for the second one.
+    # checks session.asking_question_id itself), mid-guided /exam flow (exam_text_handler), mid-guided
+    # /login flow (login_text_handler), or mid-guided /explain flow (explain_text_handler) - each
+    # checks its own user_data key and silently ignores everything else. PTB only runs the first
+    # matching handler within a given group per update, so these four - all plain
+    # filters.TEXT & ~filters.COMMAND, all wanting a look at every text update - each need their own
+    # group; sharing a group would silently starve whichever one is registered later.
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, esslce_text_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, exam_text_handler), group=1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, login_text_handler), group=2)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, explain_text_handler), group=3)
+    app.add_handler(PollAnswerHandler(mass_challenge.on_poll_answer))
+    app.add_handler(ChatJoinRequestHandler(mass_challenge.on_join_request))
+    app.add_handler(CallbackQueryHandler(mass_challenge.on_ask_ai_callback, pattern=r"^mq\|"))
     return app
 
 
@@ -183,6 +205,9 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    # httpx logs every request URL at INFO, and a Telegram Bot API URL contains the bot token -
+    # at INFO the token was written to the log on every single request.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     build_application().run_polling()
 
 

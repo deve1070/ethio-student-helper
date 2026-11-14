@@ -82,7 +82,10 @@ export interface Profile {
   onboarding_completed: boolean
   referral_code: string
   referral_paid_count: number
+  referral_earnings_etb: number
   telegram_group_url: string | null
+  telegram_bot_url: string | null
+  telegram_linked: boolean
 }
 export interface UpdateProfileBody {
   grade_level?: number
@@ -95,7 +98,8 @@ export interface PasswordResetRequestResponse {
   status: "code_sent" | "no_telegram_link"
 }
 export const auth = {
-  publicConfig: () => get<{ telegram_group_url: string | null }>("/v1/auth/public-config"),
+  publicConfig: () =>
+    get<{ telegram_group_url: string | null; telegram_bot_url: string | null }>("/v1/auth/public-config"),
   signup: (body: {
     phone_number?: string
     email?: string
@@ -124,7 +128,6 @@ export interface Citation {
 export interface ExplainResponse {
   answer: string
   citations: Citation[]
-  credits_charged: number
 }
 export const explain = {
   // Streams progress ("Writing an answer...", etc.) via onStage while the backend works through
@@ -221,6 +224,7 @@ export interface EsslceQuestion {
   item_no: number
   year_ec: number
   booklet_code: string | null
+  section: string | null
   stem: string
   options: string[]
   passage_text: string | null
@@ -301,6 +305,7 @@ export interface EsslceMistake {
   item_no: number
   year_ec: number
   booklet_code: string | null
+  section: string | null
   stem: string
   options: string[]
   passage_text: string | null
@@ -325,9 +330,20 @@ export interface ExamSummary {
     correct_index: number
   }[]
 }
+export interface EsslceExamCover {
+  paper_id: number
+  subject: string
+  year_ec: number
+  stream: string | null
+  region: string | null
+  round: string | null
+  item_count: number
+  sections: string[]
+}
 export const esslce = {
   subjects: () => get<{ subjects: { subject: string; questions: number }[] }>("/v1/esslce/subjects"),
   papers: (subject: string) => get<{ subject: string; papers: EsslcePaper[] }>("/v1/esslce/papers", { subject }),
+  paperCover: (paperId: number) => get<EsslceExamCover>(`/v1/esslce/papers/${paperId}/cover`),
   units: (subject: string) =>
     get<{ subject: string; units: { unit: string; grade: number; questions: number }[] }>(
       "/v1/esslce/units",
@@ -372,6 +388,42 @@ export const esslce = {
 // ---------------------------------------------------------------- progress (cross-system)
 export const progress = {
   streak: () => get<{ streak_days: number }>("/v1/progress/streak"),
+}
+
+// ---------------------------------------------------------------- mass-practice leaderboard
+// (the daily subscriber-only Telegram group challenge - backend/api/routes_mass_challenge.py;
+// both leaderboard reads are deliberately unauthenticated, see that file's own comment)
+export interface ChallengeLeaderboardEntry {
+  user_id: string
+  display_name: string
+  correct: number
+  answered: number
+}
+export interface ChallengeLeaderboard {
+  challenge_id: number
+  subject: string
+  unit: string
+  total_questions: number
+  entries: ChallengeLeaderboardEntry[]
+}
+export interface ConsistencyLeaderboardEntry {
+  user_id: string
+  display_name: string
+  questions_answered: number
+  days_participated: number
+}
+export interface LatestChallenge {
+  id: number
+  date: string
+  subject: string
+  unit: string
+}
+export const massChallenge = {
+  latest: () => get<LatestChallenge | null>("/v1/mass-challenge/latest"),
+  leaderboard: (challengeId: number) =>
+    get<ChallengeLeaderboard>(`/v1/mass-challenge/${challengeId}/leaderboard`),
+  consistencyLeaderboard: () =>
+    get<{ entries: ConsistencyLeaderboardEntry[] }>("/v1/mass-challenge/consistency-leaderboard"),
 }
 
 // ---------------------------------------------------------------- study plan (cross-system)
@@ -444,9 +496,11 @@ export const notes = {
 }
 
 // ---------------------------------------------------------------- payments
-export interface CreditsResponse {
-  balance: number
+export interface EntitlementResponse {
   has_active_subscription: boolean
+  subscription_expires_at: string | null
+  free_actions_used: number
+  free_actions_quota: number
 }
 export interface SubmitReceiptResponse {
   payment_id: string
@@ -454,10 +508,10 @@ export interface SubmitReceiptResponse {
   message: string
 }
 export const payments = {
-  credits: () => get<CreditsResponse>("/v1/me/credits"),
-  submitReceipt: (bundle: string, transactionId: string, file: File) => {
+  entitlement: () => get<EntitlementResponse>("/v1/me/entitlement"),
+  submitReceipt: (transactionId: string, file: File) => {
     const form = new FormData()
-    form.append("bundle", bundle)
+    form.append("plan", "yearly")
     form.append("transaction_id", transactionId)
     form.append("receipt", file)
     return request<SubmitReceiptResponse>("/v1/payments/submit-receipt", {

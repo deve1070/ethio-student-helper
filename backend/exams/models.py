@@ -208,7 +208,13 @@ class EsslceAttempt(Base):
     is_correct = Column(Boolean, nullable=False)
     mode = Column(
         String(16), nullable=False, default="practice"
-    )  # "practice" | "exam" - informational only, never gates server behavior
+    )  # "practice" | "exam" | "mass" - informational only, never gates server behavior. "mass" rows
+    # (the daily mass-challenge feature) are otherwise ordinary attempts and freely commingle with
+    # practice/exam ones in student_progress/mistakes/repeat-avoidance, same as those two already do.
+    mass_challenge_id = Column(
+        Integer, ForeignKey("mass_challenges.id", ondelete="SET NULL"), index=True
+    )  # set only for mode="mass" rows - which daily challenge this answer belongs to, so a
+    # leaderboard query is a plain WHERE on this column, never re-derived from a date/time window.
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -236,3 +242,61 @@ class EsslceElaboration(Base):
     # its own). NULL for a calculation-subject elaboration (no textbook excerpt involved) or a
     # reading-comprehension question (grounded in the exam's own passage, not a textbook).
     created_at = Column(DateTime, server_default=func.now())
+
+
+class MassChallenge(Base):
+    """One day's scheduled mass-practice event (telegram_bot/mass_challenge.py): a shared sequence
+    of native Telegram polls posted to the private group, everyone answering the same question at
+    the same time, each poll open for `question_seconds`. `question_ids` is fixed at creation - the
+    same ordered list is used for every poll sent and for scoring, so "today's challenge" never
+    silently drifts mid-event even if the question pool changes later.
+
+    One day can have TWO rows, one per `stream` - when the day's rotation lands on a subject that
+    isn't common to both streams (exams/store.py's pick_todays_challenges), natural-stream and
+    social-stream students each get their own challenge, same group, same day. `stream=""` is the
+    common case (English/SAT/Math, or Phase 1's original single-track default)."""
+
+    __tablename__ = "mass_challenges"
+    id = Column(Integer, primary_key=True)
+    date = Column(DateTime, nullable=False)  # stored at midnight UTC for that calendar day; only
+    # the date portion is ever compared against - see routes_mass_challenge.py's lookup
+    stream = Column(String(32), nullable=False, default="")  # "" | "natural_science" | "social_science"
+    subject = Column(String(64), nullable=False)
+    grade = Column(Integer)  # disambiguates a unit name that recurs across grades, same role as
+    # EsslceTopicLink.grade
+    unit = Column(String(255), nullable=False)
+    question_ids = Column(JSON, nullable=False)  # ordered list of EsslceQuestion.id
+    opens_at = Column(DateTime, nullable=False)
+    question_seconds = Column(Integer, nullable=False)  # each poll's open_period
+    created_at = Column(DateTime, server_default=func.now())
+    __table_args__ = (UniqueConstraint("date", "stream", name="uq_mass_challenge_date_stream"),)
+
+
+class MassChallengePoll(Base):
+    """poll_id -> question mapping for one sent group poll - durable in the DB (not just the bot
+    process's own memory) so a bot restart mid-event doesn't lose the ability to score incoming
+    PollAnswer updates for polls already sent."""
+
+    __tablename__ = "mass_challenge_polls"
+    id = Column(Integer, primary_key=True)
+    challenge_id = Column(
+        Integer, ForeignKey("mass_challenges.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    question_id = Column(
+        Integer, ForeignKey("esslce_questions.id", ondelete="CASCADE"), nullable=False
+    )
+    telegram_poll_id = Column(String(64), nullable=False, unique=True, index=True)  # matches
+    # python-telegram-bot's PollAnswer.poll_id
+    sent_at = Column(DateTime, server_default=func.now())
+
+
+class PrivateGroupMembership(Base):
+    """Students the bot has actually approved into the subscriber-only private Telegram group -
+    the daily expiry sweep (telegram_bot/mass_challenge.py) iterates THESE rows, not every
+    TelegramLink, so it costs one Telegram API call per actual member, not per linked student."""
+
+    __tablename__ = "private_group_memberships"
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    joined_at = Column(DateTime, server_default=func.now())

@@ -9,6 +9,8 @@ underlying retriever/agent logic; it is not part of the production path.
 Run with: uvicorn main:app --reload
 """
 
+import time
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -22,6 +24,7 @@ from api.routes_auth import router as auth_router
 from api.routes_esslce import router as esslce_router
 from api.routes_exam import router as exam_router
 from api.routes_explain import router as explain_router
+from api.routes_mass_challenge import router as mass_challenge_router
 from api.routes_payments import router as payments_router
 from api.routes_practice import router as practice_router
 from api.routes_progress import router as progress_router
@@ -62,7 +65,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
+    start = time.monotonic()
     response = await call_next(request)
+    elapsed_ms = (time.monotonic() - start) * 1000
+    # Logged for every request so a slow endpoint shows up directly in the server log instead of
+    # only being reported as "the app feels slow" - deliberately on this existing middleware (not a
+    # new one) since it already wraps every request with call_next.
+    logger.info(f"{request.method} {request.url.path} -> {response.status_code} in {elapsed_ms:.0f}ms")
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -94,6 +103,7 @@ app.include_router(progress_router)
 app.include_router(studyplan_router)
 app.include_router(notes_router)
 app.include_router(exam_router)
+app.include_router(mass_challenge_router)
 
 # Built once, reused by every /health call below instead of opening a fresh connection
 # pool per request.

@@ -44,11 +44,31 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     RECEIPTS_DIR: str = "receipts"
 
-    # The student-facing Telegram group for help/info (api/routes_auth.py surfaces this through
-    # ProfileResponse; telegram_bot/bot.py's /help reads the same value from this shared .env) —
-    # empty until the group actually exists, in which case the frontend hides the link entirely
-    # rather than show a dead one.
-    TELEGRAM_GROUP_URL: str = ""
+    # The student-facing Telegram group and bot, for Help/Contact and account-linking (both public
+    # links, not secrets - safe to default here rather than require every environment to set them).
+    # api/routes_auth.py surfaces both through ProfileResponse and /public-config;
+    # telegram_bot/bot.py's /help reads the same TELEGRAM_GROUP_URL from this shared .env.
+    TELEGRAM_GROUP_URL: str = "https://t.me/ethiopian_student_helper"
+    TELEGRAM_BOT_URL: str = "https://t.me/esh_bot"
+
+    # The subscriber-only private group the daily mass-practice event runs in (telegram_bot/
+    # mass_challenge.py) - a negative chat id once the owner creates the group and adds the bot as
+    # admin; 0 means the feature is off (the bot's scheduled jobs no-op rather than erroring).
+    TELEGRAM_PRIVATE_GROUP_ID: int = 0
+
+    # Mass-practice event timing, overridable per environment without a code change.
+    # MASS_CHALLENGE_TIME is read only by telegram_bot/config.py (the bot schedules the job, the
+    # backend doesn't need to know when it fires) - parsed with reminders.py's existing parse_time().
+    MASS_CHALLENGE_QUESTION_COUNT: int = 6
+    MASS_CHALLENGE_QUESTION_SECONDS: int = 90  # each poll's open_period; a regular (non-quiz) poll,
+    # so nobody sees correctness or an explanation until the group reveal after the last question
+
+    # Shared secret for the small number of backend calls the bot makes that aren't on behalf of
+    # any one specific student (creating/fetching today's mass challenge, checking a join request's
+    # subscription eligibility, fetching a leaderboard to post) - see auth/dependencies.py's
+    # require_bot_internal_token. MUST be overridden in any real deployment; this default is only
+    # safe for local dev, same convention as JWT_SECRET_KEY above.
+    BOT_INTERNAL_TOKEN: str = "dev-only-change-me"
 
     # Auth — JWT_SECRET_KEY MUST be overridden via environment in any
     # real deployment; this default is only safe for local dev

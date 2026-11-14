@@ -1,13 +1,14 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom"
 import clsx from "clsx"
-import { BarChart3, BookOpenCheck, GraduationCap, Home, User, Wallet } from "lucide-react"
+import { BarChart3, BookOpenCheck, GraduationCap, Home, Trophy, User, Wallet } from "lucide-react"
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
   { to: "/practice", label: "Practice", icon: BookOpenCheck },
   { to: "/esslce", label: "ESSLCE", icon: GraduationCap },
+  { to: "/leaderboard", label: "Ranks", icon: Trophy },
   { to: "/progress", label: "Progress", icon: BarChart3 },
-  { to: "/credits", label: "Credits", icon: Wallet },
+  { to: "/subscription", label: "Subscription", icon: Wallet },
   { to: "/profile", label: "Profile", icon: User },
 ]
 
@@ -15,10 +16,11 @@ const TITLES: Record<string, string> = {
   "/": "Ethiopian Student Helper",
   "/practice": "Practice",
   "/esslce": "ESSLCE Exam Bank",
+  "/leaderboard": "Leaderboard",
   "/progress": "Progress",
   "/mistakes": "Mistake Review",
   "/notes": "Study Notes",
-  "/credits": "Credits",
+  "/subscription": "Subscription",
   "/profile": "Profile",
 }
 

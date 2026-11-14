@@ -1,7 +1,7 @@
 import httpx
 
 from telegram_bot import store as _store
-from telegram_bot.config import BACKEND_BASE_URL
+from telegram_bot.config import BACKEND_BASE_URL, BOT_INTERNAL_TOKEN
 
 # Login tokens are kept by telegram_bot/store.py (a file), so a bot restart does not log students out.
 # A token that the backend rejects (401) is forgotten at once, so the next command asks for /login.
@@ -58,11 +58,13 @@ def link_account(telegram_user_id: int, identifier: str, password: str) -> None:
 
 
 def explain(telegram_user_id: int, grade: int, subject: str, question: str) -> dict:
+    # 180s, not 60s - same reasoning as esslce_elaborate below: llm/retry.py can legitimately
+    # retry a rate-limit/connection error for ~2 minutes before this even succeeds.
     response = httpx.post(
         f"{BACKEND_BASE_URL}/v1/explain",
         json={"grade": grade, "subject": subject, "question": question},
         headers=_headers(telegram_user_id),
-        timeout=60,
+        timeout=180,
     )
     _raise_for_status(response, telegram_user_id)
     return response.json()
@@ -86,15 +88,16 @@ def exam_solve(
             "image_base64": image_base64,
         },
         headers=_headers(telegram_user_id),
-        timeout=90,  # OCR + a possible LLM call can be slow
+        timeout=180,  # OCR + a possible LLM call can be slow - same rate-limit-retry margin as
+        # esslce_elaborate above
     )
     _raise_for_status(response, telegram_user_id)
     return response.json()
 
 
-def get_credits(telegram_user_id: int) -> dict:
+def get_entitlement(telegram_user_id: int) -> dict:
     response = httpx.get(
-        f"{BACKEND_BASE_URL}/v1/me/credits",
+        f"{BACKEND_BASE_URL}/v1/me/entitlement",
         headers=_headers(telegram_user_id),
         timeout=15,
     )
@@ -102,12 +105,10 @@ def get_credits(telegram_user_id: int) -> dict:
     return response.json()
 
 
-def submit_receipt(
-    telegram_user_id: int, bundle: str, transaction_id: str, photo_bytes: bytes
-) -> dict:
+def submit_receipt(telegram_user_id: int, transaction_id: str, photo_bytes: bytes) -> dict:
     response = httpx.post(
         f"{BACKEND_BASE_URL}/v1/payments/submit-receipt",
-        data={"bundle": bundle, "transaction_id": transaction_id},
+        data={"plan": "yearly", "transaction_id": transaction_id},
         files={"receipt": ("receipt.jpg", photo_bytes, "image/jpeg")},
         headers=_headers(telegram_user_id),
         timeout=30,  # the backend runs a vision call before replying
@@ -281,18 +282,111 @@ def esslce_exam_summary(telegram_user_id: int, paper_id: int) -> dict:
 
 
 def esslce_elaborate(telegram_user_id: int, question_id: int) -> dict:
-    # a cache miss means a live LLM call (grounding retrieval, or a generated+verified example) - slower
-    # than every other esslce_* call, which only ever touch the database
+    # a cache miss means a live LLM call (grounding retrieval, or a generated+verified example) -
+    # llm/retry.py retries a rate-limit/connection error up to 5 times with backoff capped at 30s
+    # per attempt, so ONE call can legitimately take ~2 minutes under real provider rate-limiting
+    # before it even succeeds (confirmed directly: a connection-error retry was observed live in
+    # this same session). 60s was too tight - it made the bot's own request time out well before
+    # the backend gave up, silently stranding "Working it out..." on screen (see
+    # handlers/esslce_handler.py's UNEXPECTED_ERROR, the backstop for whenever this still isn't
+    # enough).
     return _post(
-        telegram_user_id, "/v1/esslce/elaborate", {"question_id": question_id}, timeout=60
+        telegram_user_id, "/v1/esslce/elaborate", {"question_id": question_id}, timeout=180
     )
 
 
 def esslce_ask(telegram_user_id: int, question_id: int, message: str, history: list) -> dict:
-    # NEVER cached server-side (unlike elaborate) - every call is a fresh LLM call
+    # NEVER cached server-side (unlike elaborate) - every call is a fresh LLM call, and the backend
+    # route makes TWO of them (the same elaboration grounding call above, then the ask itself) - a
+    # wider margin than esslce_elaborate's for the same rate-limit-retry reason.
     return _post(
         telegram_user_id,
         "/v1/esslce/ask",
         {"question_id": question_id, "message": message, "history": history},
-        timeout=60,
+        timeout=240,
     )
+
+
+# ---- mass-practice event (daily subscriber-only group challenge) ---------------------------------------------
+def _bot_headers() -> dict:
+    return {"Authorization": f"Bearer {BOT_INTERNAL_TOKEN}"}
+
+
+def mass_challenge_today() -> dict:
+    response = httpx.post(
+        f"{BACKEND_BASE_URL}/v1/mass-challenge/today", headers=_bot_headers(), timeout=20
+    )
+    _raise_for_status(response)
+    return response.json()
+
+
+def mass_challenge_today_state() -> dict:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/mass-challenge/today-state", headers=_bot_headers(), timeout=20
+    )
+    _raise_for_status(response)
+    return response.json()
+
+
+def mass_challenge_question_content(question_id: int) -> dict:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/mass-challenge/question/{question_id}",
+        headers=_bot_headers(),
+        timeout=15,
+    )
+    _raise_for_status(response)
+    return response.json()
+
+
+def mass_challenge_record_poll(challenge_id: int, question_id: int, telegram_poll_id: str) -> None:
+    response = httpx.post(
+        f"{BACKEND_BASE_URL}/v1/mass-challenge/{challenge_id}/poll",
+        json={"question_id": question_id, "telegram_poll_id": telegram_poll_id},
+        headers=_bot_headers(),
+        timeout=15,
+    )
+    _raise_for_status(response)
+
+
+def mass_challenge_lookup_poll(telegram_poll_id: str) -> dict:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/mass-challenge/poll/{telegram_poll_id}",
+        headers=_bot_headers(),
+        timeout=15,
+    )
+    _raise_for_status(response)
+    return response.json()
+
+
+def mass_challenge_answer(telegram_user_id: int, challenge_id: int, question_id: int, chosen_index: int) -> dict:
+    return _post(
+        telegram_user_id,
+        "/v1/mass-challenge/answer",
+        {"challenge_id": challenge_id, "question_id": question_id, "chosen_index": chosen_index},
+    )
+
+
+def mass_challenge_leaderboard(challenge_id: int) -> dict:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/mass-challenge/{challenge_id}/leaderboard", timeout=15
+    )
+    _raise_for_status(response)
+    return response.json()
+
+
+def mass_challenge_group_eligibility(telegram_user_id: int) -> bool:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/mass-challenge/group-eligibility/{telegram_user_id}",
+        headers=_bot_headers(),
+        timeout=15,
+    )
+    _raise_for_status(response)
+    return response.json()["eligible"]
+
+
+def mass_challenge_lapsed_memberships() -> list[int]:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/mass-challenge/lapsed-memberships", headers=_bot_headers(), timeout=15
+    )
+    _raise_for_status(response)
+    return [row["telegram_user_id"] for row in response.json()["lapsed"]]

@@ -4,6 +4,7 @@ Nothing here guesses an answer."""
 
 import ast
 import json
+import random
 import re
 import subprocess
 import sys
@@ -15,6 +16,7 @@ import storage
 from llm.client import parse_json_object
 from retriever.citation import citation_for
 from sqlalchemy import and_, or_
+from sqlalchemy.orm import joinedload, selectinload
 from utils.logging import logger
 
 from .models import (
@@ -350,7 +352,14 @@ def link_topics(
 
 # ---------------------------------------------------------------------------- calculation subjects: code-executed derivation
 # Lives in config.constants now (no longer ESSLCE-exclusive knowledge - Study Notes needs it too).
-from config.constants import CALCULATION_SUBJECTS, ESSLCE_SKILL_STRAND_SUBJECTS  # noqa: E402
+from config.constants import (  # noqa: E402
+    CALCULATION_SUBJECTS,
+    COMMON_SUBJECTS,
+    ESSLCE_SKILL_STRAND_SUBJECTS,
+    NATURAL_ONLY_SUBJECTS,
+    SOCIAL_ONLY_SUBJECTS,
+    STREAM_PARTITIONED_SUBJECTS,
+)
 
 DERIVE_PROMPT = """You are given one multiple-choice question from an Ethiopian Grade 12 national exam \
 (ESSLCE) that requires a calculation or symbolic derivation, not a fact lookup.
@@ -360,9 +369,12 @@ Options:
 {options}
 
 Solve it step by step. In latex_solution, refer to options by their printed LETTER (A, B, C, D) exactly as \
-shown above - never by a number or position. Then reply with ONLY a JSON object, no other text:
+shown above - never by a number or position. Write each step as a plain prose sentence, with ONLY the actual \
+formula/computation as LaTeX in \\\\[...\\\\] on its own line - never a whole step's sentence wrapped in \
+\\\\text{{}}, and never multiple steps combined into one \\\\begin{{aligned}} block. Then reply with ONLY a \
+JSON object, no other text:
 {{"answer_index": 0,
-  "latex_solution": "a full step-by-step derivation in LaTeX, one or more \\\\[...\\\\] blocks",
+  "latex_solution": "a full step-by-step derivation, one or more \\\\[...\\\\] blocks for the formulas only",
   "verification_code": "a short Python script, using ONLY sympy/math/fractions, that independently computes \
 the final result and prints ONLY that result on its last line, formatted exactly like the matching option's \
 printed text (e.g. a fraction as '7/3', not a decimal)"}}
@@ -523,7 +535,9 @@ The explanation is shown directly to a student who only ever sees the lettered o
 never sees these numbered excerpts at all. So in explanation: refer to the chosen option by its printed \
 LETTER, never by a number or position; and state the fact directly (e.g. "Neon is a noble gas") rather than \
 citing it as coming from a numbered excerpt (never write phrases like "Excerpt [2] states" or "excerpt 1 \
-says" - the student has no idea what that means).
+says" - the student has no idea what that means). Write it as plain prose; if a formula or chemical/\
+mathematical notation genuinely needs showing, write only that notation as inline LaTeX \\( ... \\), never a \
+\\begin{{aligned}} block or a sentence wrapped in \\text{{}}.
 
 Reply with ONLY a JSON object, no other text:
 {{"answer_index": 0, "source_index": 0, "explanation": "...", "supporting_quote": "..."}}"""
@@ -651,12 +665,33 @@ def solve_paper(
     reviewed_by='ai_crosscheck'. Any other outcome (disagreement, or the secondary couldn't be reached)
     falls back to exactly the old behavior - needs_review, waiting for a human `approve` - never guessed
     into approval. Mirrors attach_key: if an already-approved question's answer changes, its approval is
-    withdrawn."""
-    solved, unresolved_n, withdrawn, auto_approved = 0, 0, 0, 0
+    withdrawn.
+
+    Commits after EVERY question, not once at the end: a run over a large paper holds one DB session
+    open for as long as its slowest LLM call multiplied by its question count (confirmed live: a 100-
+    question paper's connection was dropped by the server mid-run - psycopg2.OperationalError, "Connection
+    timed out" - and a single final commit would have discarded every question already solved, not just
+    the ones left). Committing per question means a dropped connection only costs the questions after the
+    drop; re-running `solve` afterward still re-checks every ai_derived question, approved or not - an
+    approval is only ever as good as its last cross-check, and this is the only path that can withdraw a
+    stale one (see the "Mirrors attach_key" note above), so a resume after a dropped connection costs real
+    LLM calls on top of the questions actually left, not just free to retry."""
+    solved, unresolved_n, withdrawn, auto_approved, errored = 0, 0, 0, 0, 0
     for q in paper.questions:
         if q.answer_source in ("official_key", "manual"):
             continue
-        result = solve_question_crosschecked(llm, llm_secondary, tb_store, paper, q, grades)
+        # solve_question_crosschecked already isolates a SECONDARY-call exception (treats it as
+        # "couldn't cross-check", never raises) - this isolates the PRIMARY call's own exception the
+        # same way, so one question's malformed model output or exhausted quota (groq.BadRequestError,
+        # LLMUnavailableError, ...) skips just that question instead of losing every other question in
+        # the paper. Confirmed live: one unparseable English reading-comprehension item aborted all 73
+        # questions of that paper before this fix.
+        try:
+            result = solve_question_crosschecked(llm, llm_secondary, tb_store, paper, q, grades)
+        except Exception as e:  # noqa: BLE001 - genuinely any provider failure, never fatal to the paper
+            errored += 1
+            log(f"question {q.id} errored, skipped: {e}")
+            continue
         if not result["resolved"]:
             unresolved_n += 1
             continue
@@ -686,14 +721,14 @@ def solve_paper(
         elif q.review_status in ("needs_key", "needs_review"):
             q.review_status = "needs_review"
         solved += 1
-    db.commit()
+        db.commit()
     log(
         f"solved {solved} question(s) ({auto_approved} auto-approved by cross-check agreement), "
-        f"{unresolved_n} left unresolved, {withdrawn} approval(s) withdrawn"
+        f"{unresolved_n} left unresolved, {withdrawn} approval(s) withdrawn, {errored} errored"
     )
     return {
         "solved": solved, "unresolved": unresolved_n, "withdrawn": withdrawn,
-        "auto_approved": auto_approved,
+        "auto_approved": auto_approved, "errored": errored,
     }
 
 
@@ -730,6 +765,13 @@ all. So in explanation: refer to options by their printed LETTER, never by a num
 directly rather than citing a numbered excerpt (never write "Excerpt [2] states" or similar - the student \
 has no idea what that means).
 
+Write the four parts above as plain prose sentences, in normal paragraphs - NOT as a LaTeX \\begin{{aligned}} \
+block, and never with a whole sentence wrapped in \\text{{}}. When a step genuinely needs a formula or \
+chemical/mathematical notation, write ONLY that notation as LaTeX - \\( ... \\) inline within a sentence, or \
+\\[ ... \\] on its own line for a standalone formula - and keep the surrounding explanation as ordinary text \
+around it, e.g. "the monomer is \\(\\text{{CH}}_2{{=}}\\text{{CHCl}}\\), i.e. vinyl chloride" rather than a \
+multi-line derivation block.
+
 Excerpts:
 {context}
 
@@ -739,20 +781,28 @@ If the excerpts don't actually let you ground the core concept, reply \
 {{"explanation": null, "source_index": null, "supporting_quote": null}} - no explanation is better than an \
 ungrounded one."""
 
-ELABORATE_CALC_PROMPT = """A student found this ESSLCE question difficult. Help them by making up a SIMILAR \
-example problem (different numbers or scenario, same underlying concept) and solving it step by step, so \
-they can see the method worked through on a fresh case.
+ELABORATE_CALC_PROMPT = """A student found this ESSLCE question difficult and wants to see how to arrive at the \
+correct answer for THIS EXACT question - not a similar or substitute problem.
 
-Original question: {question}
+Question: {question}
 Options:
 {options}
+The correct answer is {correct_letter}) {correct}.
+
+Write a full step-by-step derivation, using this question's own numbers throughout, that arrives at {correct_letter}. \
+Write latex_solution as plain prose sentences describing each step, with ONLY the actual formula/computation \
+of each step as LaTeX - \\( ... \\) inline within a sentence, or \\[ ... \\] on its own line for a standalone \
+formula - never a whole step wrapped in \\text{{}}, and never a \\begin{{aligned}} block spanning multiple steps.
 
 Reply with ONLY a JSON object, no other text:
-{{"example_problem": "the new example problem, in full",
-  "latex_solution": "a full step-by-step LaTeX derivation of the new example, ending in its final answer",
-  "final_answer": "just the final numeric/symbolic answer, formatted plainly (e.g. '7/3')",
+{{"latex_solution": "a full step-by-step derivation of THIS question, ending in {correct_letter}) {correct}",
   "verification_code": "a short Python script, using ONLY sympy/math/fractions, that independently computes \
-the new example's answer and prints ONLY that result on its last line, formatted exactly like final_answer"}}"""
+this question's own answer from its own given numbers and prints ONLY that result on its last line, formatted \
+exactly like the correct option's printed text (e.g. a fraction as '7/3', not a decimal)"}}
+
+If you cannot actually derive {correct_letter}) {correct} from this question's own numbers - for instance if the \
+question turns out not to be a single computable value - reply {{"latex_solution": null, "verification_code": null}} \
+instead of forcing a derivation to match an answer you can't actually reach."""
 
 
 def elaborate_grounded(
@@ -801,12 +851,22 @@ def elaborate_grounded(
 
 
 def elaborate_calculation(llm, q: EsslceQuestion) -> dict:
-    """A fresh, similar worked example for a calculation subject - verified the same way
-    solve_question_calculation verifies the original: the code is actually executed, and the example is
-    trusted only if its result matches what the LLM itself claimed as the final answer."""
+    """A step-by-step derivation of THIS question (not a substitute example) for a calculation subject -
+    verified the same way solve_question_calculation verifies the original: the code is actually executed,
+    and the derivation is trusted only if its computed result matches the question's own already-keyed
+    correct option, not just that the LLM says so. A question reaching this function is always already
+    `eligible()` (the /elaborate route 404s otherwise), which requires answer_index to be set - the
+    isinstance guard below is defensive, not a path this should ever actually take in production."""
     unresolved = {"resolved": False}
-    options_listing = "\n".join(f"{L}) {opt}" for L, opt in zip("ABCD", q.options or []))
-    prompt = ELABORATE_CALC_PROMPT.format(question=q.stem, options=options_listing)
+    if not isinstance(q.answer_index, int) or not (0 <= q.answer_index < len(q.options or [])):
+        return unresolved
+    options = q.options or []
+    options_listing = "\n".join(f"{L}) {opt}" for L, opt in zip("ABCD", options))
+    correct_letter = "ABCD"[q.answer_index]
+    correct = options[q.answer_index]
+    prompt = ELABORATE_CALC_PROMPT.format(
+        question=q.stem, options=options_listing, correct_letter=correct_letter, correct=correct
+    )
     raw = (
         llm.chat(messages=[{"role": "user", "content": prompt}])["choices"][0]["message"]["content"] or ""
     ).strip()
@@ -814,19 +874,15 @@ def elaborate_calculation(llm, q: EsslceQuestion) -> dict:
     if not data:
         return unresolved
 
-    problem, latex, final_answer, code = (
-        data.get("example_problem"), data.get("latex_solution"),
-        data.get("final_answer"), data.get("verification_code"),
-    )
-    if not all(isinstance(x, str) and x.strip() for x in (problem, latex, final_answer, code)):
+    latex, code = data.get("latex_solution"), data.get("verification_code")
+    if not all(isinstance(x, str) and x.strip() for x in (latex, code)):
         return unresolved
 
     computed = run_verification_code(code)
-    if computed is None or not _results_match(computed, final_answer):
+    if computed is None or not _results_match(computed, correct):
         return unresolved
 
-    content = f"{problem.strip()}\n\n{_clean_latex(latex.strip())}"
-    return {"resolved": True, "content": content, "is_calculation": True}
+    return {"resolved": True, "content": _clean_latex(latex.strip()), "is_calculation": True}
 
 
 def elaborate_question(
@@ -872,7 +928,9 @@ Correct answer: {correct}
 {context_block}
 
 Refer to options by their printed LETTER (A-D), never by a number or "excerpt N". Keep replies focused and \
-concise - the student is reading this on a phone."""
+concise - the student is reading this on a phone. Write in plain prose - if you need to show a formula or \
+chemical/mathematical notation, use \\( ... \\) inline within a sentence (or \\[ ... \\] only for a formula \
+standing on its own line), never a \\begin{{aligned}} block and never a whole sentence wrapped in \\text{{}}."""
 
 
 def ask_about_question(llm, q: EsslceQuestion, elaboration: EsslceElaboration | None, history: list, message: str) -> str:
@@ -1389,6 +1447,104 @@ def eligible_units(db, subject: str) -> list:
     ]
 
 
+# ---------------------------------------------------------------------------- mass challenge (daily group practice)
+# Deliberately just the ESSLCE-relevant, unit-organized subjects - the same set subject_visible()
+# partitions by stream (config/constants.py). English/SAT are organized by skill strand, not unit
+# (eligible_units() already returns [] for them - see ESSLCE_SKILL_STRAND_SUBJECTS below), so they
+# naturally never come up in this rotation; that's consistent with the feature being explicitly
+# unit-based, not a gap. Sorted for a stable, deterministic rotation order.
+MASS_CHALLENGE_SUBJECTS = sorted(STREAM_PARTITIONED_SUBJECTS)
+
+
+def _pick_unit_from(db, subjects: list[str], day_index: int) -> tuple[str, int | None, str] | None:
+    """Deterministic rotation over one subject list - the subject/unit picked for a given
+    day_index is always the same if called again (no stored rotation-index state needed). Walks
+    the list starting from a day-of-year-derived offset, skipping any subject with zero eligible
+    units right now, then picks a unit from that subject's own eligible list the same way. Returns
+    None only if nothing in `subjects` is eligible at all."""
+    n = len(subjects)
+    for offset in range(n):
+        subject = subjects[(day_index + offset) % n]
+        units = eligible_units(db, subject)
+        if units:
+            unit_entry = units[day_index % len(units)]
+            return subject, unit_entry["grade"], unit_entry["unit"]
+    return None
+
+
+def pick_todays_unit(db, today) -> tuple[str, int | None, str] | None:
+    """The single combined rotation across every stream-partitioned subject - see
+    pick_todays_challenges below for the stream-aware version actually used to build a day's
+    MassChallenge row(s); this stays a thin wrapper since it's also the simplest thing to point a
+    direct test at."""
+    return _pick_unit_from(db, MASS_CHALLENGE_SUBJECTS, today.timetuple().tm_yday)
+
+
+def pick_todays_challenges(db, today) -> list[dict]:
+    """One day's mass-challenge events: a list of 1 or 2 dicts, each {stream, subject, grade, unit}.
+
+    The day's subject is chosen by the single combined rotation above (pick_todays_unit). If that
+    subject is common to both streams (English/SAT/Math), there's exactly one event, stream="".
+    Otherwise that subject only serves ONE stream (e.g. chemistry is natural-only) - the OTHER
+    stream would get nothing at all that day, so a second event is picked independently, rotating
+    over just that other stream's own subject list the same way (same day_index, so it's equally
+    deterministic and reproducible, just over a different, smaller list). Returns an empty list
+    only if literally nothing in the whole bank is eligible yet."""
+    day_index = today.timetuple().tm_yday
+    main = _pick_unit_from(db, MASS_CHALLENGE_SUBJECTS, day_index)
+    if main is None:
+        return []
+    subject, grade, unit = main
+    if subject in COMMON_SUBJECTS:
+        return [{"stream": "", "subject": subject, "grade": grade, "unit": unit}]
+
+    primary_stream = "natural_science" if subject in NATURAL_ONLY_SUBJECTS else "social_science"
+    challenges = [{"stream": primary_stream, "subject": subject, "grade": grade, "unit": unit}]
+
+    other_stream = "social_science" if primary_stream == "natural_science" else "natural_science"
+    other_subjects = sorted(SOCIAL_ONLY_SUBJECTS if other_stream == "social_science" else NATURAL_ONLY_SUBJECTS)
+    other = _pick_unit_from(db, other_subjects, day_index)
+    if other:
+        o_subject, o_grade, o_unit = other
+        challenges.append({"stream": other_stream, "subject": o_subject, "grade": o_grade, "unit": o_unit})
+    return challenges
+
+
+def pick_mass_challenge_questions(
+    db, subject: str, grade: int | None, unit: str, count: int
+) -> list[int]:
+    """The same unit-filtered eligible pool /esslce/next's own `unit` request param builds (same
+    query shape as eligible_units() above, narrowed to one (grade, unit) instead of counting every
+    one) - sampled down to `count` question ids. Runs once a day (not per-request), so the simpler,
+    fully-ORM-free column query here doesn't need /next's own lightweight-query optimization."""
+    rows = (
+        db.query(
+            EsslceQuestion.id,
+            EsslceTopicLink.grade,
+            EsslceTopicLink.unit,
+            EsslceTopicLink.verified,
+            EsslceTopicLink.score,
+            EsslceTopicLink.rank,
+        )
+        .join(EsslcePaper, EsslceQuestion.paper_id == EsslcePaper.id)
+        .join(EsslceTopicLink, EsslceTopicLink.question_id == EsslceQuestion.id)
+        .filter(EsslcePaper.subject == subject, eligible_filter())
+        .all()
+    )
+    by_question: dict[int, list] = {}
+    for qid, g, u, verified, score, rank in rows:
+        by_question.setdefault(qid, []).append(
+            SimpleNamespace(grade=g, unit=u, verified=verified, score=score, rank=rank)
+        )
+    matching_ids = []
+    for qid, links in by_question.items():
+        links.sort(key=lambda l: (not l.verified, l.score if l.score is not None else 9.0, l.rank))
+        if links[0].unit == unit and (grade is None or links[0].grade == grade):
+            matching_ids.append(qid)
+    matching_ids.sort()  # deterministic base order before random sampling
+    return random.sample(matching_ids, min(count, len(matching_ids)))
+
+
 # ---------------------------------------------------------------------------- student progress + recommendation
 # Fewer attempts than this isn't a real signal that a topic is weak - it's noise from one lucky or unlucky
 # guess (GPT's own review of this project put it well: "do not label a topic mastered based on one correct
@@ -1420,9 +1576,20 @@ def student_progress(db, user_id, subject: str) -> dict:
     if not latest:
         return empty
 
+    # best_unit(q) below reads q.paper.subject and q.links for every question - without eager loading,
+    # each of those is a SEPARATE lazy-loaded query per question (both relationships default to
+    # lazy="select"), so this call alone turns into 2 extra round trips PER ATTEMPTED QUESTION. Confirmed
+    # live: a student with ~30 attempts took 16 SECONDS on this endpoint before this fix, on a connection
+    # with ~500ms round-trip latency - the same N+1 pattern already fixed elsewhere in this file
+    # (eligible_units, eligible_skill_strands, diagnostic_questions, unit_stats), just missed here since
+    # this function's own query is already bounded by attempt count, not full subject size, so it never
+    # showed up as an outright OOM the way those did.
     questions = {
         q.id: q
-        for q in db.query(EsslceQuestion).filter(EsslceQuestion.id.in_(latest.keys())).all()
+        for q in db.query(EsslceQuestion)
+        .options(joinedload(EsslceQuestion.paper), selectinload(EsslceQuestion.links))
+        .filter(EsslceQuestion.id.in_(latest.keys()))
+        .all()
     }
 
     unit_rows: dict = {}
