@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from datetime import time as dtime
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import NetworkError, TimedOut
+from telegram.error import BadRequest, Forbidden, NetworkError, TimedOut
 from telegram.ext import ContextTypes
 
 from telegram_bot import api_client
@@ -31,18 +31,20 @@ from telegram_bot.api_client import BackendError
 from telegram_bot.config import (
     MASS_CHALLENGE_HEADSUP_MINUTES,
     MASS_CHALLENGE_NATURAL_TOPIC_ID,
+    MASS_CHALLENGE_NUDGE_MINUTES,
     MASS_CHALLENGE_SOCIAL_TOPIC_ID,
     MASS_CHALLENGE_TIME,
     TELEGRAM_PRIVATE_GROUP_ID,
 )
 from telegram_bot.esslce_flow import EsslceSession
 from telegram_bot.handlers.esslce_handler import SESSION_KEY, keyboard
-from telegram_bot.practice_flow import Screen, pretty_subject
+from telegram_bot.practice_flow import Screen, clip, pretty_subject
 
 logger = logging.getLogger(__name__)
 
 BREATHER_SECONDS = 15  # fixed pause between one poll closing and the next opening
 RESUME_OPEN_WINDOW = 30 * 60  # resume_after_restart: how late a swallowed opening is still started
+START_ME_FIRST = "Open a private chat with me first (press Start there), then tap this again."
 RESUME_REVEAL_GRACE = 120  # ...and how long after the last poll closed a reveal is still owed
 STREAM_LABELS = {"natural_science": "🌿 Natural stream", "social_science": "🏛 Social stream"}
 # Two separate topics so natural-stream and social-stream polls never interleave in the same
@@ -185,7 +187,12 @@ def _schedule_questions(job_queue, challenge: dict, pending: list, first_delay: 
     job_queue.run_once(
         reveal,
         when=reveal_delay,
-        data={"challenge_id": challenge_id, "label": label, "topic_id": topic_id},
+        data={
+            "challenge_id": challenge_id,
+            "label": label,
+            "topic_id": topic_id,
+            "question_ids": challenge["question_ids"],
+        },
         name=f"mass-challenge-{challenge_id}-reveal",
     )
 
@@ -230,6 +237,7 @@ async def resume_after_restart(application) -> None:
                     "challenge_id": challenge["id"],
                     "label": STREAM_LABELS.get(challenge["stream"], ""),
                     "topic_id": TOPIC_IDS.get(challenge["stream"]),
+                    "question_ids": challenge["question_ids"],
                 },
                 name=f"mass-challenge-{challenge['id']}-reveal",
             )
@@ -365,23 +373,75 @@ async def reveal(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("Could not fetch leaderboard for challenge %s", challenge_id)
         return
 
-    if not board["entries"]:
-        await context.bot.send_message(
-            TELEGRAM_PRIVATE_GROUP_ID,
+    if board["entries"]:
+        lines = [f"🏁 {prefix}Results - {pretty_subject(board['subject'])}, {board['unit']}:"]
+        medals = ["🥇", "🥈", "🥉"]
+        for i, entry in enumerate(board["entries"][:10]):
+            medal = medals[i] if i < len(medals) else f"{i + 1}."
+            lines.append(f"{medal} {entry['display_name']} - {entry['correct']}/{board['total_questions']}")
+        results = "\n".join(lines)
+    else:
+        results = (
             f"⏱ {prefix}That's today's {board['total_questions']} questions! Nobody answered this "
-            "time - tomorrow's another chance.",
-            message_thread_id=topic_id,
+            "time - tomorrow's another chance."
         )
-        return
-
-    lines = [f"🏁 {prefix}Results - {pretty_subject(board['subject'])}, {board['unit']}:"]
-    medals = ["🥇", "🥈", "🥉"]
-    for i, entry in enumerate(board["entries"][:10]):
-        medal = medals[i] if i < len(medals) else f"{i + 1}."
-        lines.append(f"{medal} {entry['display_name']} - {entry['correct']}/{board['total_questions']}")
-    await context.bot.send_message(
-        TELEGRAM_PRIVATE_GROUP_ID, "\n".join(lines), message_thread_id=topic_id
+    await _send_with_retry(
+        lambda: context.bot.send_message(TELEGRAM_PRIVATE_GROUP_ID, results, message_thread_id=topic_id)
     )
+    await _post_answer_key(context, challenge_id, context.job.data.get("question_ids", []), prefix, topic_id)
+
+
+def _has_math(text: str | None) -> bool:
+    return bool(text) and ("$" in text or "\\" in text)
+
+
+async def _post_answer_key(context, challenge_id: int, question_ids: list, prefix: str, topic_id) -> None:
+    """After the results: each question's correct option (and its explanation, when it is plain
+    text - raw LaTeX would be unreadable in a message; "Ask AI" on that poll covers those), plus
+    the button that opens the private catch-up flow for anyone who missed the polls."""
+    lines = [f"✅ {prefix}Answers:"]
+    for i, question_id in enumerate(question_ids):
+        try:
+            q = await asyncio.to_thread(api_client.mass_challenge_question_content, question_id)
+        except BackendError:
+            logger.exception("Could not fetch question %s for the answer key", question_id)
+            continue
+        letter = "ABCD"[q["answer_index"]]
+        option = q["options"][q["answer_index"]]
+        line = f"{i + 1}. {letter}" if _has_math(option) else f"{i + 1}. {letter}) {clip(option, 120)}"
+        if q["explanation"] and not _has_math(q["explanation"]):
+            line += f"\n   {clip(q['explanation'], 220)}"
+        lines.append(line)
+    markup = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("📝 Missed it? Catch up privately", callback_data=f"mc|{challenge_id}")]]
+    )
+    text = "\n\n".join(lines)[:4000]
+    await _send_with_retry(
+        lambda: context.bot.send_message(
+            TELEGRAM_PRIVATE_GROUP_ID, text, reply_markup=markup, message_thread_id=topic_id
+        )
+    )
+
+
+def _question_text_and_image(header: str, q: dict) -> tuple[str, str | None]:
+    """A question as (message text, optional base64 image). A diagram question keeps its text and
+    adds the source page photo; a math-bearing one shows only the header as text, since its raw
+    stem is unrendered LaTeX and the rendered image carries the stem and options instead."""
+    body = "\n".join(f"{L}) {opt}" for L, opt in zip("ABCD", q["options"]))
+    if q["diagram_image_base64"]:
+        return f"{header}\n\n{q['stem']}\n\n{body}", q["diagram_image_base64"]
+    if q["stem_image_base64"]:
+        return header, q["stem_image_base64"]
+    return f"{header}\n\n{q['stem']}\n\n{body}", None
+
+
+async def _dm_question(bot, user_id: int, header: str, q: dict, buttons: list) -> None:
+    text, image = _question_text_and_image(header, q)
+    if image:  # photo first, so the answer buttons end up below it
+        photo = io.BytesIO(base64.b64decode(image))
+        photo.name = "question.png"
+        await bot.send_photo(user_id, photo)
+    await bot.send_message(user_id, text, reply_markup=keyboard(Screen(text, buttons)))
 
 
 async def on_ask_ai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -399,36 +459,168 @@ async def on_ask_ai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not api_client.is_logged_in(user_id):
         await query.answer("Please /login with me first, then tap this again.", show_alert=True)
         return
-    await query.answer("Sent to your DM!")
-
     try:
         q = await asyncio.to_thread(api_client.mass_challenge_question_content, question_id)
     except BackendError:
         logger.exception("Could not fetch mass-challenge question %s for Ask AI", question_id)
+        await query.answer("Couldn't load that question. Please try again.", show_alert=True)
         return
 
     context.user_data[SESSION_KEY] = EsslceSession(api_client, user_id)
+    buttons = [[("🔍 Explain more", f"ee|{question_id}")], [("💬 Ask about this", f"eq|{question_id}")]]
+    try:
+        await _dm_question(context.bot, user_id, f"Item #{q['item_no']}", q, buttons)
+    except Forbidden:
+        await query.answer(START_ME_FIRST, show_alert=True)
+        return
+    await query.answer("Sent to your DM!")
 
-    body = "\n".join(f"{L}) {opt}" for L, opt in zip("ABCD", q["options"]))
-    diagram_image = q["diagram_image_base64"]
-    stem_image = None if diagram_image else q["stem_image_base64"]
-    if diagram_image:
-        text, image = f"Item #{q['item_no']}\n\n{q['stem']}\n\n{body}", diagram_image
-    elif stem_image:
-        text, image = f"Item #{q['item_no']}", stem_image
+
+# ---- catch-up: the day's questions answered privately, after (or instead of) the group polls ----
+async def catchup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/catchup - today's mass practice in this private chat, for a student who missed the polls."""
+    user_id = update.effective_user.id
+    if not api_client.is_logged_in(user_id):
+        await update.effective_message.reply_text("Please /login first with your phone/email and password.")
+        return
+    try:
+        state = await asyncio.to_thread(api_client.mass_challenge_today_state)
+    except BackendError:
+        await update.effective_message.reply_text("Couldn't load today's practice. Please try again shortly.")
+        return
+    challenges = state["challenges"]
+    if not challenges:
+        await update.effective_message.reply_text("Today's mass practice hasn't been set yet. Check back this evening.")
+    elif len(challenges) == 1:
+        await _send_catchup_question(context, user_id, challenges[0]["id"])
     else:
-        text, image = f"Item #{q['item_no']}\n\n{q['stem']}\n\n{body}", None
+        rows = [
+            [(f"{STREAM_LABELS.get(c['stream'], 'Everyone')}: {pretty_subject(c['subject'])}", f"mc|{c['id']}")]
+            for c in challenges
+        ]
+        text = "Which of today's practices?"
+        await update.effective_message.reply_text(text, reply_markup=keyboard(Screen(text, rows)))
 
-    screen = Screen(
-        text,
-        [[("🔍 Explain more", f"ee|{question_id}")], [("💬 Ask about this", f"eq|{question_id}")]],
-        image_base64=image,
-    )
-    await context.bot.send_message(user_id, screen.text, reply_markup=keyboard(screen))
-    if screen.image_base64:
-        photo = io.BytesIO(base64.b64decode(screen.image_base64))
-        photo.name = "question.png"
-        await context.bot.send_photo(user_id, photo)
+
+async def on_catchup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """mc|<challenge_id> - "Missed it? Catch up privately" under the group's answer key, "Next" in
+    the catch-up flow itself, and the streak reminder's button. Always continues in the student's
+    own chat, wherever it was tapped."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not api_client.is_logged_in(user_id):
+        await query.answer("Please /login with me first, then tap this again.", show_alert=True)
+        return
+    try:
+        await _send_catchup_question(context, user_id, int(query.data.split("|")[1]))
+    except Forbidden:
+        await query.answer(START_ME_FIRST, show_alert=True)
+        return
+    await query.answer("Sent to your DM!" if query.message.chat.type != "private" else None)
+
+
+async def _send_catchup_question(context, user_id: int, challenge_id: int) -> None:
+    try:
+        progress = await asyncio.to_thread(api_client.mass_challenge_remaining, user_id, challenge_id)
+    except BackendError as e:
+        await context.bot.send_message(
+            user_id,
+            "Your session expired. Please /login again." if e.status_code == 401
+            else "Couldn't load today's practice. Please try again shortly.",
+        )
+        return
+    remaining = progress["remaining_question_ids"]
+    if not remaining:
+        await context.bot.send_message(
+            user_id,
+            f"✅ You've answered all {progress['total']} of today's questions. Today counts toward your streak.",
+        )
+        return
+    question_id = remaining[0]
+    try:
+        q = await asyncio.to_thread(api_client.mass_challenge_question_content, question_id)
+    except BackendError:
+        await context.bot.send_message(user_id, "Couldn't load the next question. Please try /catchup again.")
+        return
+    number = progress["total"] - len(remaining) + 1
+    header = f"{pretty_subject(progress['subject'])} - {progress['unit']}\nQuestion {number}/{progress['total']}"
+    buttons = [[(L, f"ma|{challenge_id}|{question_id}|{i}") for i, L in enumerate("ABCD"[: len(q["options"])])]]
+    await _dm_question(context.bot, user_id, header, q, buttons)
+
+
+async def on_catchup_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """ma|<challenge_id>|<question_id>|<chosen_index>. The backend decides whether the answer is
+    late (that question's group poll already closed). A late answer gets its result at once - the
+    correct answers are already posted in the group; one given while the poll is still open is
+    only acknowledged, same as a vote on the poll itself."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    _, challenge_id, question_id, chosen = query.data.split("|")
+    challenge_id, question_id, chosen = int(challenge_id), int(question_id), int(chosen)
+    try:
+        res = await asyncio.to_thread(api_client.mass_challenge_answer, user_id, challenge_id, question_id, chosen)
+        q = await asyncio.to_thread(api_client.mass_challenge_question_content, question_id)
+    except BackendError as e:
+        await query.answer(
+            "Your session expired. Please /login again." if e.status_code == 401
+            else "Couldn't record that. Please try again.",
+            show_alert=True,
+        )
+        return
+    await query.answer()
+
+    if not res["late"]:
+        text = "Recorded. Results come with the group's reveal."
+    else:
+        correct_letter = "ABCD"[q["answer_index"]]
+        text = "✅ Correct!" if res["is_correct"] else f"❌ Not quite. The correct answer is {correct_letter}."
+        if not res["recorded"]:
+            text += "\n(You had already answered this one - your first answer stands.)"
+        if q["explanation"] and not _has_math(q["explanation"]):
+            text += f"\n\nWhy: {clip(q['explanation'], 600)}"
+    context.user_data[SESSION_KEY] = EsslceSession(api_client, user_id)  # for "Explain more" below
+    buttons = [[("Next ➡", f"mc|{challenge_id}")]]
+    if res["late"]:
+        buttons.append([("🔍 Explain more", f"ee|{question_id}")])
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard(Screen(text, buttons)))
+    except BadRequest:
+        await context.bot.send_message(user_id, text, reply_markup=keyboard(Screen(text, buttons)))
+
+
+# ---- streak reminder ----------------------------------------------------------------------------
+def schedule_streak_nudge(job_queue, tz) -> bool:
+    if TELEGRAM_PRIVATE_GROUP_ID == 0 or job_queue is None:
+        return False
+    opens = reminders.parse_time(MASS_CHALLENGE_TIME) or dtime(20, 0)
+    at = datetime.combine(datetime.today(), opens) + timedelta(minutes=MASS_CHALLENGE_NUDGE_MINUTES)
+    for job in job_queue.get_jobs_by_name("mass-challenge-nudge"):
+        job.schedule_removal()
+    job_queue.run_daily(send_streak_nudges, time=at.time().replace(tzinfo=tz), name="mass-challenge-nudge")
+    return True
+
+
+async def send_streak_nudges(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """One private message to each student whose streak ends tonight (took part yesterday, nothing
+    yet today) - never a message to the whole group. The list comes from the backend's /at-risk."""
+    try:
+        students = await asyncio.to_thread(api_client.mass_challenge_at_risk)
+    except BackendError:
+        logger.exception("Could not fetch at-risk students for the streak reminder")
+        return
+    for student in students:
+        days = student["streak_days"]
+        text = (
+            f"🔥 Your {days}-day mass-practice streak ends tonight - you haven't answered today's "
+            "questions yet. Catch up now and keep it going."
+        )
+        buttons = [[("Catch up ➡", f"mc|{student['challenge_id']}")]]
+        try:
+            await context.bot.send_message(
+                student["telegram_user_id"], text, reply_markup=keyboard(Screen(text, buttons))
+            )
+        except Exception:
+            logger.exception("Could not send the streak reminder to %s", student["telegram_user_id"])
 
 
 async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

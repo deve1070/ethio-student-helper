@@ -9,7 +9,7 @@ recorded when their PollAnswer update arrives); the two leaderboard reads are in
 (no auth) since they're non-sensitive and also used by the web app's own /leaderboard page."""
 
 import base64
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from auth.dependencies import get_current_user, require_bot_internal_token
 from config.settings import settings
@@ -26,12 +26,15 @@ from exams.models import (
 from exams.store import pick_mass_challenge_questions, pick_todays_challenges, question_page_image
 from fastapi import APIRouter, Depends, HTTPException
 from payments.entitlement import has_active_subscription
-from practice.selection import local_date
+from practice.selection import local_date, study_streak, today_local
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/v1/mass-challenge", tags=["mass-challenge"])
+
+MASS_MODES = ("mass", "mass_late")  # EsslceAttempt.mode values that count as mass-practice participation
+POLL_CLOSE_GRACE_SECONDS = 10  # a vote Telegram accepted just before closing can arrive slightly after
 
 
 class TodayChallengeResponse(BaseModel):
@@ -67,9 +70,42 @@ class MassAnswerRequest(BaseModel):
 
 class MassAnswerResponse(BaseModel):
     recorded: bool  # False when this (user, challenge, question) was already answered - a no-op
-    is_correct: bool  # returned for completeness, but the bot never displays it - the poll itself
-    # is type="regular" (not "quiz"), so Telegram shows no correctness to the voter either; nothing
-    # reveals the answer until the group's own reveal message after the question sequence ends
+    is_correct: bool  # the bot shows this only for a late answer (below) - an on-time vote on the
+    # group poll gets no feedback until the group's reveal message
+    late: bool  # answered after that question's group poll had closed (the private catch-up
+    # flow). Stored as mode="mass_late": it counts toward the student's participation days and
+    # question totals, but not toward the day's or week's score ranking, since the correct
+    # answers have already been posted in the group by then.
+
+
+class RemainingResponse(BaseModel):
+    challenge_id: int
+    subject: str
+    unit: str
+    total: int
+    remaining_question_ids: list[int]
+
+
+class AtRiskStudent(BaseModel):
+    telegram_user_id: int
+    streak_days: int
+    challenge_id: int
+
+
+class AtRiskResponse(BaseModel):
+    students: list[AtRiskStudent]
+
+
+class WeeklyLeaderboardEntry(BaseModel):
+    user_id: str
+    display_name: str
+    correct: int
+    answered: int
+    days_participated: int
+
+
+class WeeklyLeaderboardResponse(BaseModel):
+    entries: list[WeeklyLeaderboardEntry]
 
 
 class ChallengeLeaderboardEntry(BaseModel):
@@ -337,13 +373,16 @@ def answer(
         .first()
     )
     if existing is not None:
-        return MassAnswerResponse(recorded=False, is_correct=existing.is_correct)
+        return MassAnswerResponse(
+            recorded=False, is_correct=existing.is_correct, late=existing.mode == "mass_late"
+        )
 
     question = db.get(EsslceQuestion, request.question_id)
     if question is None:
         raise HTTPException(status_code=404, detail="Question not found.")
 
     is_correct = request.chosen_index == question.answer_index
+    late = _poll_closed(db, challenge, question.id)
     db.add(
         EsslceAttempt(
             user_id=user.id,
@@ -351,12 +390,131 @@ def answer(
             paper_id=question.paper_id,
             chosen_index=request.chosen_index,
             is_correct=is_correct,
-            mode="mass",
+            mode="mass_late" if late else "mass",
             mass_challenge_id=request.challenge_id,
         )
     )
     db.commit()
-    return MassAnswerResponse(recorded=True, is_correct=is_correct)
+    return MassAnswerResponse(recorded=True, is_correct=is_correct, late=late)
+
+
+def is_late_answer(seconds_since_poll: float | None, question_seconds: int, challenge_has_polls: bool) -> bool:
+    """Whether an answer arriving now is after that question's group poll closed.
+    seconds_since_poll is None when this question has no poll row: before the event starts that
+    means "not late"; once the challenge has posted any poll it means this question's own poll
+    was never recorded (a failed send), and the event has moved on without it."""
+    if seconds_since_poll is None:
+        return challenge_has_polls
+    return seconds_since_poll > question_seconds + POLL_CLOSE_GRACE_SECONDS
+
+
+def _poll_closed(db: Session, challenge: MassChallenge, question_id: int) -> bool:
+    since = (
+        db.query(func.extract("epoch", func.now() - func.max(MassChallengePoll.sent_at)))
+        .filter(MassChallengePoll.challenge_id == challenge.id, MassChallengePoll.question_id == question_id)
+        .scalar()
+    )
+    has_polls = (
+        db.query(MassChallengePoll.id).filter(MassChallengePoll.challenge_id == challenge.id).first()
+        is not None
+    )
+    return is_late_answer(float(since) if since is not None else None, challenge.question_seconds, has_polls)
+
+
+@router.get("/{challenge_id}/remaining", response_model=RemainingResponse)
+def remaining(
+    challenge_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> RemainingResponse:
+    """The questions of one challenge this student has not answered yet, in the day's order -
+    what the bot's private catch-up flow serves next."""
+    challenge = db.get(MassChallenge, challenge_id)
+    if challenge is None:
+        raise HTTPException(status_code=404, detail="Challenge not found.")
+    answered = {
+        row[0]
+        for row in db.query(EsslceAttempt.question_id).filter(
+            EsslceAttempt.user_id == user.id, EsslceAttempt.mass_challenge_id == challenge_id
+        )
+    }
+    return RemainingResponse(
+        challenge_id=challenge.id,
+        subject=challenge.subject,
+        unit=challenge.unit,
+        total=len(challenge.question_ids),
+        remaining_question_ids=[q for q in challenge.question_ids if q not in answered],
+    )
+
+
+@router.get("/at-risk", response_model=AtRiskResponse, dependencies=[Depends(require_bot_internal_token)])
+def at_risk(db: Session = Depends(get_db)) -> AtRiskResponse:
+    """Students whose mass-practice streak ends tonight: they took part yesterday, have not
+    answered anything today, and today's challenge exists. Each comes with the challenge to catch
+    up on - their own stream's on a stream-split day, the shared one otherwise. For the bot's
+    evening reminder, which messages only these students, not the whole group."""
+    challenges = db.query(MassChallenge).filter(MassChallenge.date == date.today()).all()
+    if not challenges:
+        return AtRiskResponse(students=[])
+    by_stream = {c.stream: c for c in challenges}
+
+    days_by_user: dict = {}
+    for user_id, created_at in db.query(EsslceAttempt.user_id, EsslceAttempt.created_at).filter(
+        EsslceAttempt.mode.in_(MASS_MODES)
+    ):
+        days_by_user.setdefault(user_id, set()).add(local_date(created_at))
+
+    today = today_local()
+    at_risk_ids = [u for u, days in days_by_user.items() if today not in days and study_streak(days) > 0]
+    if not at_risk_ids:
+        return AtRiskResponse(students=[])
+
+    users = {u.id: u for u in db.query(User).filter(User.id.in_(at_risk_ids))}
+    students = []
+    for link in db.query(TelegramLink).filter(TelegramLink.user_id.in_(at_risk_ids)):
+        user = users.get(link.user_id)
+        challenge = by_stream.get(user.stream or "") or by_stream.get("") if user else None
+        if challenge is None:
+            continue
+        students.append(
+            AtRiskStudent(
+                telegram_user_id=link.telegram_user_id,
+                streak_days=study_streak(days_by_user[link.user_id]),
+                challenge_id=challenge.id,
+            )
+        )
+    return AtRiskResponse(students=students)
+
+
+@router.get("/weekly-leaderboard", response_model=WeeklyLeaderboardResponse)
+def weekly_leaderboard(db: Session = Depends(get_db)) -> WeeklyLeaderboardResponse:
+    """Score ranking over the last 7 local days (today included). On-time answers only
+    (mode="mass") - a catch-up answer is given after the correct answers were posted."""
+    first_day = today_local() - timedelta(days=6)
+    tally: dict = {}
+    for user_id, is_correct, created_at in db.query(
+        EsslceAttempt.user_id, EsslceAttempt.is_correct, EsslceAttempt.created_at
+    ).filter(EsslceAttempt.mode == "mass", EsslceAttempt.created_at >= datetime.utcnow() - timedelta(days=8)):
+        day = local_date(created_at)
+        if day < first_day:
+            continue
+        entry = tally.setdefault(user_id, {"correct": 0, "answered": 0, "days": set()})
+        entry["answered"] += 1
+        entry["correct"] += bool(is_correct)
+        entry["days"].add(day)
+
+    users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(tally.keys())).all()}
+    entries = [
+        WeeklyLeaderboardEntry(
+            user_id=str(user_id),
+            display_name=_display_name(users_by_id[user_id]),
+            correct=t["correct"],
+            answered=t["answered"],
+            days_participated=len(t["days"]),
+        )
+        for user_id, t in tally.items()
+        if user_id in users_by_id
+    ]
+    entries.sort(key=lambda e: (-e.correct, -e.days_participated, -e.answered, e.display_name))
+    return WeeklyLeaderboardResponse(entries=entries)
 
 
 @router.get("/{challenge_id}/leaderboard", response_model=ChallengeLeaderboardResponse)
@@ -367,7 +525,7 @@ def challenge_leaderboard(challenge_id: int, db: Session = Depends(get_db)) -> C
 
     rows = (
         db.query(EsslceAttempt.user_id, EsslceAttempt.is_correct)
-        .filter(EsslceAttempt.mass_challenge_id == challenge_id)
+        .filter(EsslceAttempt.mass_challenge_id == challenge_id, EsslceAttempt.mode == "mass")
         .all()
     )
     tally: dict = {}
@@ -403,7 +561,7 @@ def challenge_leaderboard(challenge_id: int, db: Session = Depends(get_db)) -> C
 def consistency_leaderboard(db: Session = Depends(get_db)) -> ConsistencyLeaderboardResponse:
     rows = (
         db.query(EsslceAttempt.user_id, EsslceAttempt.created_at)
-        .filter(EsslceAttempt.mode == "mass")
+        .filter(EsslceAttempt.mode.in_(MASS_MODES))
         .all()
     )
     days_by_user: dict = {}

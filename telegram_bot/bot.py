@@ -60,6 +60,7 @@ COMMANDS = [
     BotCommand("explain", "Ask the textbook a question"),
     BotCommand("exam", "Get help with an exam question"),
     BotCommand("remind", "Set a daily practice reminder"),
+    BotCommand("catchup", "Answer today's mass practice privately"),
     BotCommand("status", "Check your subscription status"),
     BotCommand("subscribe", "Subscribe for a year of unlimited access"),
     BotCommand("help", "Get help or join our student group"),
@@ -152,6 +153,7 @@ async def post_init(application: Application) -> None:
         logger.info("Daily mass-challenge event is OFF (TELEGRAM_PRIVATE_GROUP_ID not set)")
     mass_challenge.schedule_headsup(application.job_queue, tz)
     mass_challenge.schedule_sweep(application.job_queue, tz)
+    mass_challenge.schedule_streak_nudge(application.job_queue, tz)
     await mass_challenge.resume_after_restart(application)
 
 
@@ -198,6 +200,9 @@ def build_application() -> Application:
     app.add_handler(PollAnswerHandler(mass_challenge.on_poll_answer))
     app.add_handler(ChatJoinRequestHandler(mass_challenge.on_join_request))
     app.add_handler(CallbackQueryHandler(mass_challenge.on_ask_ai_callback, pattern=r"^mq\|"))
+    app.add_handler(CommandHandler("catchup", mass_challenge.catchup_command))
+    app.add_handler(CallbackQueryHandler(mass_challenge.on_catchup_callback, pattern=r"^mc\|"))
+    app.add_handler(CallbackQueryHandler(mass_challenge.on_catchup_answer, pattern=r"^ma\|"))
     return app
 
 

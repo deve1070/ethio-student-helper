@@ -208,7 +208,8 @@ class EsslceAttempt(Base):
     is_correct = Column(Boolean, nullable=False)
     mode = Column(
         String(16), nullable=False, default="practice"
-    )  # "practice" | "exam" | "mass" - informational only, never gates server behavior. "mass" rows
+    )  # "practice" | "exam" | "mass" | "mass_late" (a catch-up answer given after that
+    # question's group poll closed - see routes_mass_challenge.py) - informational only, never gates server behavior. "mass" rows
     # (the daily mass-challenge feature) are otherwise ordinary attempts and freely commingle with
     # practice/exam ones in student_progress/mistakes/repeat-avoidance, same as those two already do.
     mass_challenge_id = Column(

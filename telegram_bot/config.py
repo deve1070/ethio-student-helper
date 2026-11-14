@@ -23,6 +23,9 @@ TELEGRAM_PRIVATE_GROUP_ID = int(os.environ.get("TELEGRAM_PRIVATE_GROUP_ID", "0")
 MASS_CHALLENGE_TIME = os.environ.get("MASS_CHALLENGE_TIME", "20:00")
 # How long before MASS_CHALLENGE_TIME the one heads-up message goes out.
 MASS_CHALLENGE_HEADSUP_MINUTES = int(os.environ.get("MASS_CHALLENGE_HEADSUP_MINUTES", "10"))
+# How long after MASS_CHALLENGE_TIME the private streak reminder goes to students who took part
+# yesterday but have not answered today (mass_challenge.send_streak_nudges).
+MASS_CHALLENGE_NUDGE_MINUTES = int(os.environ.get("MASS_CHALLENGE_NUDGE_MINUTES", "60"))
 
 
 def _topic_id(name: str) -> int | None:

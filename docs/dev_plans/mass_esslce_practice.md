@@ -217,3 +217,28 @@ this app's existing list/ranking-page conventions (e.g. `MistakesPage.tsx`'s lis
   configured `MASS_CHALLENGE_TIME`, posts the right number of timed quiz polls, and the reveal
   message's leaderboard matches what was actually answered; confirm the web app's `/leaderboard`
   page reflects the same data.
+
+## Addendum: after the reveal (answer key, catch-up, streak reminder, weekly ranking)
+
+Built after Phase 1, on top of the group-poll design (the "Core mechanic" section above describes
+quiz polls; the shipped version uses regular polls, so nobody sees correctness before the reveal).
+
+- **Answer key.** The reveal job posts a second message: each question's correct option, plus its
+  explanation when that is plain text. An explanation containing LaTeX is left out, since a group
+  message cannot render it; the poll's "Ask AI" button covers those.
+- **Catch-up.** A student who missed the polls answers the same questions in their private chat
+  (`/catchup`, or the button under the answer key). The backend decides whether an answer is late:
+  it is late when that question's group poll closed more than 10 seconds ago, or when the question
+  has no poll of its own while the challenge has already posted others. A late answer is stored as
+  `EsslceAttempt.mode = "mass_late"`. It counts toward participation days and question totals (the
+  consistency ranking), and is excluded from the day's and the week's score rankings, because the
+  correct answers are public by then.
+- **Streak reminder.** `MASS_CHALLENGE_NUDGE_MINUTES` after the opening time, the bot privately
+  messages each student who took part yesterday and has not answered today (`GET /at-risk`), with a
+  button into the catch-up flow for their own stream's challenge.
+- **Weekly ranking.** `GET /weekly-leaderboard`: on-time correct answers over the last 7 local days.
+- **Invite link.** `TELEGRAM_PRIVATE_GROUP_URL`, returned in the profile only to a subscribed student.
+
+Alternatives considered for catch-up scoring: counting late answers in the day's ranking (rejected:
+the answers are already posted), or not recording them at all (rejected: one missed evening would
+end a streak, the discipline problem this feature exists to solve).

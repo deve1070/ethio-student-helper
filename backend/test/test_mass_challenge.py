@@ -217,5 +217,15 @@ check("the student with more correct answers ranks first", ranked[0][0] == stude
 check("the student with fewer correct answers ranks second", ranked[1][0] == runner_up.id)
 
 
+# ---- late answers: after a question's group poll has closed, an answer is a catch-up answer ------
+from api.routes_mass_challenge import is_late_answer  # noqa: E402
+
+check("answer while the poll is open is on time", is_late_answer(30.0, 90, True) is False)
+check("answer inside the closing grace is on time", is_late_answer(95.0, 90, True) is False)
+check("answer after the poll closed is late", is_late_answer(200.0, 90, True) is True)
+check("no poll for this question, event not started: on time", is_late_answer(None, 90, False) is False)
+check("no poll for this question, event under way: late", is_late_answer(None, 90, True) is True)
+
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
