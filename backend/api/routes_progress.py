@@ -10,7 +10,14 @@ from db.models import TelegramLink, User
 from db.models_practice import QuizAttempt
 from db.session import get_db
 from exams.models import EsslceAttempt, EsslcePaper
-from exams.store import eligible_units, recommend_focus, student_progress
+from config.constants import ESSLCE_SKILL_STRAND_SUBJECTS, subject_visible
+from exams.store import (
+    eligible_skill_strands,
+    eligible_units,
+    readiness,
+    recommend_focus,
+    student_progress,
+)
 from fastapi import APIRouter, Depends
 from practice.selection import local_date, study_streak, today_local
 from sqlalchemy.orm import Session
@@ -104,3 +111,29 @@ def weekly_reports(db: Session = Depends(get_db)) -> dict:
             }
         )
     return {"reports": reports}
+
+
+@router.get("/readiness")
+def exam_readiness(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Projected ESSLCE score per subject (exams/store.py's readiness), for every subject the
+    student chose or has practised, plus days left to their exam date."""
+    practised = {
+        row[0]
+        for row in db.query(EsslcePaper.subject)
+        .join(EsslceAttempt, EsslceAttempt.paper_id == EsslcePaper.id)
+        .filter(EsslceAttempt.user_id == user.id)
+        .distinct()
+    }
+    subjects = sorted(
+        s for s in practised | set(user.subjects_selected or []) if subject_visible(s, user.stream)
+    )
+    out = []
+    for subject in subjects:
+        skills = subject in ESSLCE_SKILL_STRAND_SUBJECTS
+        weights = eligible_skill_strands(db, subject) if skills else eligible_units(db, subject)
+        if not weights:
+            continue
+        r = readiness(student_progress(db, user.id, subject), weights, "skills" if skills else "units")
+        out.append({"subject": subject, **r})
+    days_left = (user.exam_date - today_local()).days if user.exam_date else None
+    return {"exam_date": user.exam_date, "days_left": days_left, "subjects": out}

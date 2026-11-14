@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { BookOpenCheck, BookText, Calendar, GraduationCap, MessageCircleQuestion, RotateCcw, Sparkles } from "lucide-react"
 import { Card, CardButton } from "../components/ui/Card"
 import { InstallAppCard } from "../components/ui/InstallAppCard"
+import { ReadinessCard } from "../components/ui/ReadinessCard"
 import { Spinner } from "../components/ui/Primitives"
 import { StudyPlanTaskRow } from "../components/ui/StudyPlanTaskRow"
 import { useAuth } from "../lib/auth"
@@ -131,6 +132,8 @@ export function DashboardPage() {
           </div>
         </div>
       )}
+
+      <ReadinessCard />
 
       {review.length > 0 && (
         <Card className="flex flex-col gap-2 p-4">

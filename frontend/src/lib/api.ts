@@ -402,8 +402,18 @@ export const esslce = {
 }
 
 // ---------------------------------------------------------------- progress (cross-system)
+export interface SubjectReadiness {
+  subject: string
+  projected: number | null // 0-1; null until the student has answered enough in the subject
+  coverage: number // 0-1: share of the exam made up of units with enough answers to count
+  answered: number
+}
 export const progress = {
   streak: () => get<{ streak_days: number }>("/v1/progress/streak"),
+  readiness: () =>
+    get<{ exam_date: string | null; days_left: number | null; subjects: SubjectReadiness[] }>(
+      "/v1/progress/readiness",
+    ),
 }
 
 // ---------------------------------------------------------------- mass-practice leaderboard

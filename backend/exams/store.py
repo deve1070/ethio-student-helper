@@ -1718,6 +1718,41 @@ def get_or_create_unit_insight(db, llm, subject: str, grade: int | None, unit: s
 # answer" - the same caution applies in the other direction, to calling something weak).
 MIN_ATTEMPTS_FOR_SIGNAL = 3
 
+READINESS_MIN_ANSWERS = 10  # fewer answers in a subject than this and no projection is shown
+GUESS_RATE = 0.25  # four options: what a student scores knowing nothing
+
+
+def readiness(progress: dict, exam_weights: list[dict], axis: str) -> dict:
+    """A projected exam score for one subject. progress: student_progress(); exam_weights: the
+    subject's eligible units (or skill strands for English/SAT) with their past-question counts,
+    which say how much of a real exam each one makes up; axis: "units" or "skills".
+
+    Each unit's expected accuracy is the student's own accuracy in it, pulled toward their overall
+    accuracy in the subject by two imaginary answers - so a unit answered twice is not taken at
+    face value - and a unit never practised counts at that overall accuracy. The projection is the
+    exam-weighted sum. coverage is the share of the exam made up of units with at least
+    MIN_ATTEMPTS_FOR_SIGNAL answers: how much of the projection rests on direct evidence."""
+    answered = progress["attempted"]
+    if answered < READINESS_MIN_ANSWERS:
+        return {"projected": None, "coverage": 0.0, "answered": answered}
+    overall = (progress["correct"] + 2 * GUESS_RATE) / (answered + 2)
+    key = (lambda r: (r["grade"], r["unit"])) if axis == "units" else (lambda r: r["skill"])
+    own = {key(r): r for r in progress[axis]}
+    total = sum(w["questions"] for w in exam_weights)
+    if not total:
+        return {"projected": None, "coverage": 0.0, "answered": answered}
+    projected = covered = 0.0
+    for w in exam_weights:
+        share = w["questions"] / total
+        r = own.get(key(w))
+        if r is None:
+            projected += share * overall
+            continue
+        projected += share * (r["correct"] + 2 * overall) / (r["attempted"] + 2)
+        if r["attempted"] >= MIN_ATTEMPTS_FOR_SIGNAL:
+            covered += share
+    return {"projected": projected, "coverage": covered, "answered": answered}
+
 
 def student_progress(db, user_id, subject: str) -> dict:
     """Per-unit and per-skill-strand accuracy for one student in one subject, from their own attempt
