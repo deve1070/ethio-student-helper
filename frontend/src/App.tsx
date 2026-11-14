@@ -1,33 +1,34 @@
+import { lazy, Suspense } from "react"
 import { Navigate, Route, Routes, useSearchParams } from "react-router-dom"
 import { AppShell } from "./components/layout/AppShell"
 import { FullPageSpinner } from "./components/ui/Primitives"
 import { useAuth } from "./lib/auth"
 import { LoginPage } from "./pages/auth/Login"
 import { SignupPage } from "./pages/auth/Signup"
-import { ForgotPasswordPage } from "./pages/auth/ForgotPassword"
-import { OnboardingPage } from "./pages/onboarding/OnboardingPage"
+const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPassword").then((m) => ({ default: m.ForgotPasswordPage })))
+const OnboardingPage = lazy(() => import("./pages/onboarding/OnboardingPage").then((m) => ({ default: m.OnboardingPage })))
 import { DashboardPage } from "./pages/Dashboard"
-import { ExplainPage } from "./pages/explain/ExplainPage"
-import { PracticeSubjectsPage } from "./pages/practice/PracticeSubjects"
-import { PracticeUnitsPage } from "./pages/practice/PracticeUnits"
-import { PracticeSessionPage } from "./pages/practice/PracticeSession"
-import { ProgressPage } from "./pages/progress/ProgressPage"
-import { LeaderboardPage } from "./pages/leaderboard/LeaderboardPage"
-import { MistakesPage } from "./pages/mistakes/MistakesPage"
-import { NotesSubjectsPage } from "./pages/notes/NotesSubjects"
-import { NotesUnitsPage } from "./pages/notes/NotesUnits"
-import { NotesDetailPage } from "./pages/notes/NotesDetail"
-import { EsslceSubjectsPage } from "./pages/esslce/EsslceSubjects"
-import { EsslceModePickerPage } from "./pages/esslce/EsslceModePicker"
-import { EsslcePapersPage } from "./pages/esslce/EsslcePapers"
-import { EsslceCoverPage } from "./pages/esslce/EsslceCover"
-import { EsslceUnitsPage } from "./pages/esslce/EsslceUnits"
-import { EsslceSessionPage } from "./pages/esslce/EsslceSession"
-import { EsslceSummaryPage } from "./pages/esslce/EsslceSummary"
-import { CreditsPage } from "./pages/payments/CreditsPage"
-import { BuyPage } from "./pages/payments/BuyPage"
-import { ProfilePage } from "./pages/Profile"
-import { StudyPlanPage } from "./pages/studyplan/StudyPlanPage"
+const ExplainPage = lazy(() => import("./pages/explain/ExplainPage").then((m) => ({ default: m.ExplainPage })))
+const PracticeSubjectsPage = lazy(() => import("./pages/practice/PracticeSubjects").then((m) => ({ default: m.PracticeSubjectsPage })))
+const PracticeUnitsPage = lazy(() => import("./pages/practice/PracticeUnits").then((m) => ({ default: m.PracticeUnitsPage })))
+const PracticeSessionPage = lazy(() => import("./pages/practice/PracticeSession").then((m) => ({ default: m.PracticeSessionPage })))
+const ProgressPage = lazy(() => import("./pages/progress/ProgressPage").then((m) => ({ default: m.ProgressPage })))
+const LeaderboardPage = lazy(() => import("./pages/leaderboard/LeaderboardPage").then((m) => ({ default: m.LeaderboardPage })))
+const MistakesPage = lazy(() => import("./pages/mistakes/MistakesPage").then((m) => ({ default: m.MistakesPage })))
+const NotesSubjectsPage = lazy(() => import("./pages/notes/NotesSubjects").then((m) => ({ default: m.NotesSubjectsPage })))
+const NotesUnitsPage = lazy(() => import("./pages/notes/NotesUnits").then((m) => ({ default: m.NotesUnitsPage })))
+const NotesDetailPage = lazy(() => import("./pages/notes/NotesDetail").then((m) => ({ default: m.NotesDetailPage })))
+const EsslceSubjectsPage = lazy(() => import("./pages/esslce/EsslceSubjects").then((m) => ({ default: m.EsslceSubjectsPage })))
+const EsslceModePickerPage = lazy(() => import("./pages/esslce/EsslceModePicker").then((m) => ({ default: m.EsslceModePickerPage })))
+const EsslcePapersPage = lazy(() => import("./pages/esslce/EsslcePapers").then((m) => ({ default: m.EsslcePapersPage })))
+const EsslceCoverPage = lazy(() => import("./pages/esslce/EsslceCover").then((m) => ({ default: m.EsslceCoverPage })))
+const EsslceUnitsPage = lazy(() => import("./pages/esslce/EsslceUnits").then((m) => ({ default: m.EsslceUnitsPage })))
+const EsslceSessionPage = lazy(() => import("./pages/esslce/EsslceSession").then((m) => ({ default: m.EsslceSessionPage })))
+const EsslceSummaryPage = lazy(() => import("./pages/esslce/EsslceSummary").then((m) => ({ default: m.EsslceSummaryPage })))
+const CreditsPage = lazy(() => import("./pages/payments/CreditsPage").then((m) => ({ default: m.CreditsPage })))
+const BuyPage = lazy(() => import("./pages/payments/BuyPage").then((m) => ({ default: m.BuyPage })))
+const ProfilePage = lazy(() => import("./pages/Profile").then((m) => ({ default: m.ProfilePage })))
+const StudyPlanPage = lazy(() => import("./pages/studyplan/StudyPlanPage").then((m) => ({ default: m.StudyPlanPage })))
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -58,6 +59,7 @@ function RedirectIfOnboarded({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
+    <Suspense fallback={<FullPageSpinner />}>
     <Routes>
       <Route
         path="/login"
@@ -135,5 +137,6 @@ export default function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   )
 }

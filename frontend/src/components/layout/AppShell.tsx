@@ -1,5 +1,7 @@
+import { Suspense } from "react"
 import { NavLink, Outlet, useLocation } from "react-router-dom"
 import clsx from "clsx"
+import { FullPageSpinner } from "../ui/Primitives"
 import { BarChart3, BookOpenCheck, GraduationCap, Home, Trophy, User, Wallet } from "lucide-react"
 
 const NAV_ITEMS = [
@@ -43,7 +45,9 @@ export function AppShell() {
       </header>
 
       <main className="flex-1 overflow-y-auto px-4 py-5">
-        <Outlet />
+        <Suspense fallback={<FullPageSpinner />}>
+          <Outlet />
+        </Suspense>
       </main>
 
       <nav
