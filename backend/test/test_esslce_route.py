@@ -59,6 +59,14 @@ stub(
     EXAM_COLLECTION_NAME="esslce_exams",
     CALCULATION_SUBJECTS={"mathematics", "physics", "chemistry", "scholastic_aptitude_test"},
     ESSLCE_SKILL_STRAND_SUBJECTS={"english", "scholastic_aptitude_test"},
+    STREAM_PARTITIONED_SUBJECTS={
+        "biology", "chemistry", "physics", "economics", "geography", "history",
+        "english", "scholastic_aptitude_test", "mathematics",
+    },
+    COMMON_SUBJECTS={"english", "scholastic_aptitude_test", "mathematics"},
+    NATURAL_ONLY_SUBJECTS={"biology", "chemistry", "physics"},
+    SOCIAL_ONLY_SUBJECTS={"economics", "geography", "history"},
+    subject_visible=lambda subject, stream: True,  # stream-filtering itself isn't this test's concern
 )
 stub("config.settings", settings=types.SimpleNamespace(VECTOR_DATABASE_URL="x", SUPABASE_URL="", SUPABASE_SERVICE_KEY=""))
 sys.modules["config"].constants = sys.modules["config.constants"]
@@ -187,6 +195,17 @@ assert r.json()["papers"][0]["ready_for_students"] == 3, r.json()
 
 r = c.get("/v1/esslce/papers", params={"subject": "chemistry"})
 assert r.status_code == 404, r.text  # no chemistry paper at all
+
+# both fixture subjects (mathematics, english) are COMMON_SUBJECTS - stream filtering never hides them,
+# for either stream (config/constants.py's subject_visible is tested directly in test_auth_route.py;
+# this just confirms /subjects actually calls it without wrongly excluding a common subject)
+user.stream = "natural_science"
+r = c.get("/v1/esslce/subjects")
+assert {s["subject"] for s in r.json()["subjects"]} == {"mathematics", "english"}, r.json()
+user.stream = "social_science"
+r = c.get("/v1/esslce/subjects")
+assert {s["subject"] for s in r.json()["subjects"]} == {"mathematics", "english"}, r.json()
+user.stream = None
 
 # ---- 2. /next without paper_id: practice pool, only eligible questions -----------------------------------------
 r = c.post("/v1/esslce/next", json={"subject": "mathematics", "count": 10})
@@ -325,21 +344,23 @@ assert r2.json()["content"] == b["content"]  # served from EsslceElaboration, no
 db3 = Session()
 assert db3.query(EM.EsslceElaboration).filter(EM.EsslceElaboration.question_id == e1.id).count() == 1
 
-# ---- 7. /elaborate: calculation path, renders an image, verified against an executed code sample ---------------
+# ---- 7. /elaborate: calculation path, renders an image, verified against the question's OWN already-keyed
+# correct answer (not a substitute example) - m1 is "2+2=?" with answer_index 1 -> "4" ---------------------------
 llm_state["response"] = json.dumps({
-    "example_problem": "What is 2+5?",
-    "latex_solution": "\\[ 2+5=7 \\]",
-    "final_answer": "7",
-    "verification_code": "print(2+5)",
+    "latex_solution": "\\[ 2+2=4 \\]",
+    "verification_code": "print(2+2)",  # computes "4", matches m1's own correct option - not a fresh example
 })
 r = c.post("/v1/esslce/elaborate", json={"question_id": m1.id})
 b = r.json()
 assert r.status_code == 200 and b["is_calculation"] and b["content_image_base64"], b
+assert "2+2=4" in b["content"]  # explains THIS question, not a different made-up one
 
-# ---- 8. /elaborate: an ungroundable response (or one that fails code verification) is rejected, not shown -------
+# ---- 8. /elaborate: rejected when the verification code's result doesn't match the question's real answer ------
+# m2 is "3+3=?" with answer_index 1 -> "6"; this code computes 7, which doesn't match - the derivation is
+# refused rather than shown explaining a wrong (or merely self-consistent-but-irrelevant) result.
 llm_state["response"] = json.dumps({
-    "example_problem": "What is 2+5?", "latex_solution": "x", "final_answer": "999",
-    "verification_code": "print(2+5)",  # computes 7, claims 999 - doesn't match
+    "latex_solution": "x",
+    "verification_code": "print(2+5)",
 })
 r = c.post("/v1/esslce/elaborate", json={"question_id": m2.id})
 assert r.status_code == 422, r.text
@@ -377,6 +398,36 @@ assert r.status_code == 200 and "noble gas" in r.json()["reply"], r.text
 r = c.post("/v1/esslce/ask", json={"question_id": m_diagram.id, "message": "hi", "history": []})
 assert r.status_code == 404, r.text  # never-eligible question, same gate as /elaborate
 
+# ---- 8d. free-action accounting across /elaborate + /ask - the shared pool, not stubbed here, is the
+# real payments.entitlement module against the same real SQLite db as everything else in this file.
+# Successes charge exactly once per (feature, question): e1 (elaborate, success), m1 (elaborate,
+# success), e2 (elaborate, success); e1's two repeat calls above are dedup'd (free); m2 (422) and
+# m_diagram (404, both features) never reach check_entitlement at all. /ask never dedups - its one
+# successful call above charges unconditionally. ------------------------------------------------------
+db3.expire_all()
+usage = db3.query(M.FreeActionUsage).filter_by(user_id=user.id).all()
+assert len(usage) == 4, usage
+assert {(u.feature, u.resource_key) for u in usage} == {
+    ("elaborate", str(e1.id)), ("elaborate", str(m1.id)), ("elaborate", str(e2.id)), ("ask", None),
+}, usage
+
+# ---- 8e. quota exhaustion: drive the shared pool up with filler usage, then confirm an
+# already-unlocked question's elaboration stays free while a genuinely new one 402s, and /ask
+# (which never dedups) 402s even for a question already elaborated -----------------------------------
+for _ in range(4):
+    db3.add(M.FreeActionUsage(user_id=user.id, feature="explain", resource_key=None))
+db3.commit()
+assert db3.query(M.FreeActionUsage).filter_by(user_id=user.id).count() == 8  # 4 above + 4 filler
+
+r = c.post("/v1/esslce/elaborate", json={"question_id": m1.id})  # already unlocked
+assert r.status_code == 200 and "2+2=4" in r.json()["content"], r.text
+
+r = c.post("/v1/esslce/elaborate", json={"question_id": m_diagram_ok.id})  # never elaborated before
+assert r.status_code == 402, r.text
+
+r = c.post("/v1/esslce/ask", json={"question_id": e2.id, "message": "one more thing?", "history": []})
+assert r.status_code == 402, r.text  # /ask never dedups, even on a question already elaborated
+
 # ---- 9. /mistakes: latest-wrong-per-question only, newest first, ineligible questions never resurface ----------
 c.post("/v1/esslce/answer", json={"question_id": m_diagram_ok.id, "chosen_index": 1, "mode": "practice"})  # wrong (key is 0)
 # backdate m2's wrong attempt (made in section 5 above) relative to utcnow() - SQLite's CURRENT_TIMESTAMP
@@ -404,5 +455,16 @@ assert all(m["passage_text"] is None for m in r.json())  # no passage for these 
 c.post("/v1/esslce/answer", json={"question_id": m2.id, "chosen_index": 1, "mode": "practice"})
 r = c.get("/v1/esslce/mistakes", params={"subject": "mathematics"})
 assert [m["question_id"] for m in r.json()] == [m_diagram_ok.id], r.json()
+
+# ---- 10. stem_image_base64: set when the stem or an option contains LaTeX math (any subject, not
+# just calculation ones - this is a Telegram-rendering fix, not a math-notation feature), None otherwise
+m_arrow = mk(
+    math_paper, 7, "Leaves $\\rightarrow$ Grasshoppers $\\rightarrow$ Rodents. If rodents decrease, there will be",
+    ["an increase in leopards", "fewer grasshoppers", "no change", "an increase in grasshoppers"], 3,
+)
+r = c.post("/v1/esslce/next", json={"subject": "mathematics", "paper_id": math_paper.id})
+by_id = {q["id"]: q for q in r.json()["questions"]}
+assert by_id[m_arrow.id]["stem_image_base64"], by_id[m_arrow.id]  # stem has LaTeX -> rendered
+assert by_id[m1.id]["stem_image_base64"] is None, by_id[m1.id]  # "2+2=?" has no LaTeX -> not rendered
 
 print("ESSLCE ROUTE TESTS PASSED")

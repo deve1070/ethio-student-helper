@@ -348,13 +348,29 @@ class EsslceSession:
         self.current = q = self.queue.pop(0)
         body = "\n".join(f"{L}) {clip(opt, 200)}" for L, opt in zip(LETTERS, q["options"]))
         passage = f"{clip(q['passage_text'], 700)}\n\n" if q.get("passage_text") else ""
-        text = f"{self._header(q)}\n\n{passage}{clip(q['stem'], 500)}\n\n{body}"
         # A has_diagram item's stem/options alone are incomplete (they refer to a figure/table the vision
         # model couldn't transcribe as text) - its real source page photo is sent as its own message, same
         # self-contained-caption pattern as _feedback_screen's explanation image (a photo upload can land
-        # out of order against a later question's faster text edit).
-        image = q.get("diagram_image_base64")
-        image_caption = f"{self._header(q)}\n\n{clip(q['stem'], 300)}\n\n{body}" if image else None
+        # out of order against a later question's faster text edit); the text edit still carries the full
+        # stem/options too, both because they're genuinely readable text (just incomplete, not broken) and
+        # so the student sees SOMETHING immediately while the slower photo upload is still in flight.
+        # diagram_image_base64 takes priority when a question somehow has both - the real page photo is
+        # strictly more informative (it already shows any math on the printed page too).
+        diagram_image = q.get("diagram_image_base64")
+        stem_image = None if diagram_image else q.get("stem_image_base64")
+        if diagram_image:
+            text = f"{self._header(q)}\n\n{passage}{clip(q['stem'], 500)}\n\n{body}"
+            image_caption = f"{self._header(q)}\n\n{clip(q['stem'], 300)}\n\n{body}"
+        elif stem_image:
+            # Unlike the diagram case, the stem/options text here is actually BROKEN (raw, unrendered
+            # LaTeX) - showing it even briefly while the photo uploads would show the bug this feature
+            # exists to fix, so the text edit stays header-only instead.
+            text = self._header(q)
+            image_caption = f"{self._header(q)}\n\n{clip(q['stem'], 300)}\n\n{body}"
+        else:
+            text = f"{self._header(q)}\n\n{passage}{clip(q['stem'], 500)}\n\n{body}"
+            image_caption = None
+        image = diagram_image or stem_image
         return Screen(
             text,
             [
@@ -387,23 +403,31 @@ class EsslceSession:
         return self._feedback_screen(q, chosen, res)
 
     def _feedback_screen(self, q, chosen, res) -> Screen:
-        lines = []
-        for i, (L, opt) in enumerate(zip(LETTERS, q["options"])):
-            mark = (
-                "  ✅"
-                if i == res["correct_index"]
-                else ("  ❌ (your answer)" if i == chosen else "")
-            )
-            lines.append(f"{L}) {clip(opt, 200)}{mark}")
         verdict = (
             "✅ Correct!"
             if res["is_correct"]
             else f"❌ Not quite. The correct answer is {LETTERS[res['correct_index']]}."
         )
-        options_block = "\n".join(lines)
-        text = f"{verdict}\n\n{clip(q['stem'], 500)}\n\n{options_block}"
-        image = res.get("explanation_image_base64")
-        if not image and res.get("explanation"):
+        # A math-bearing stem/options is shown via stem_image_base64 (set on the question payload
+        # /next already returned, same field _question_screen uses) rather than repeated here as
+        # broken raw LaTeX text - the correct LETTER is still always stated in `verdict` above even
+        # when the actual option text isn't repeated, so "which one was right" is never lost.
+        stem_image = q.get("stem_image_base64")
+        if stem_image:
+            stem_block = ""
+        else:
+            lines = []
+            for i, (L, opt) in enumerate(zip(LETTERS, q["options"])):
+                mark = (
+                    "  ✅"
+                    if i == res["correct_index"]
+                    else ("  ❌ (your answer)" if i == chosen else "")
+                )
+                lines.append(f"{L}) {clip(opt, 200)}{mark}")
+            stem_block = f"{clip(q['stem'], 500)}\n\n" + "\n".join(lines) + "\n\n"
+        text = f"{verdict}\n\n{stem_block}".rstrip()
+        explanation_image = res.get("explanation_image_base64")
+        if not explanation_image and res.get("explanation"):
             text += f"\n\nWhy: {clip(res['explanation'], 600)}"
         elif res.get("supporting_quote"):
             text += f"\n\nWhy: {clip(res['explanation'] or '', 400)}\nTextbook: “{clip(res['supporting_quote'], 200)}”"
@@ -412,13 +436,24 @@ class EsslceSession:
         # following question, so the caption repeats verdict+options here. That way each message is
         # self-contained and still makes sense on its own however the two end up ordered in the chat,
         # instead of relying on the image staying next to a separate text message that explains it.
+        # explanation_image stays the PRIMARY image (unchanged from before) when both it and a math-
+        # bearing stem_image exist for the same question - stem_image becomes the second, "extra"
+        # photo in that case, rather than trying to merge two unrelated images into one.
+        image = explanation_image or stem_image
         image_caption = None
-        if image:
-            short_lines = [
-                f"{L}) {clip(opt, 100)}" + ("  ✅" if i == res["correct_index"] else "")
-                for i, (L, opt) in enumerate(zip(LETTERS, q["options"]))
-            ]
-            image_caption = f"{verdict}\n\n{clip(q['stem'], 300)}\n\n" + "\n".join(short_lines)
+        if explanation_image:
+            if stem_image:
+                image_caption = f"{verdict}\n\nSee the question photo below for the options."
+            else:
+                short_lines = [
+                    f"{L}) {clip(opt, 100)}" + ("  ✅" if i == res["correct_index"] else "")
+                    for i, (L, opt) in enumerate(zip(LETTERS, q["options"]))
+                ]
+                image_caption = f"{verdict}\n\n{clip(q['stem'], 300)}\n\n" + "\n".join(short_lines)
+        elif stem_image:
+            image_caption = verdict
+        extra_image = stem_image if (explanation_image and stem_image) else None
+        extra_image_caption = "The question" if extra_image else None
         return Screen(
             text,
             [
@@ -429,6 +464,8 @@ class EsslceSession:
             ],
             image_base64=image,
             image_caption=image_caption,
+            extra_image_base64=extra_image,
+            extra_image_caption=extra_image_caption,
         )
 
     @staticmethod

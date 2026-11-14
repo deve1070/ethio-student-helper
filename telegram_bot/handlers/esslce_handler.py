@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import io
+import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
@@ -12,8 +13,15 @@ from telegram_bot.api_client import BackendError
 from telegram_bot.esslce_flow import EsslceSession
 from telegram_bot.practice_flow import FlowError
 
+logger = logging.getLogger(__name__)
+
 SESSION_KEY = "esslce_session"
 LOGIN_FIRST = "Please /login first with your phone/email and password."
+# Shown whenever something NEITHER FlowError NOR BackendError catches goes wrong (an LLM call that
+# outlasts even the bumped client timeout, a dropped connection, a malformed response, ...) - the
+# one thing every one of these failures must never do is leave "Working it out..."/"Thinking..."
+# frozen on screen forever with no way forward except guessing to retype /esslce.
+UNEXPECTED_ERROR = "That took too long or something went wrong. Send /esslce to continue."
 
 
 def keyboard(screen) -> InlineKeyboardMarkup | None:
@@ -30,6 +38,8 @@ def keyboard(screen) -> InlineKeyboardMarkup | None:
 def friendly_esslce_error(e: BackendError) -> str:
     if e.status_code == 401:
         return "Your session expired. Please /login again."
+    if e.status_code == 402:
+        return "You've used all your free previews. Use /subscribe for a full year of unlimited access."
     if e.status_code in (400, 404, 409, 422):
         return f"That didn't work: {e.detail}"
     if e.status_code == 503:
@@ -69,6 +79,10 @@ async def _show(query, screen) -> None:
         photo = io.BytesIO(base64.b64decode(screen.image_base64))
         photo.name = "solution.png"
         await query.message.chat.send_photo(photo, caption=screen.image_caption)
+    if screen.extra_image_base64:
+        photo = io.BytesIO(base64.b64decode(screen.extra_image_base64))
+        photo.name = "question.png"
+        await query.message.chat.send_photo(photo, caption=screen.extra_image_caption)
 
 
 async def esslce_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -93,11 +107,19 @@ async def esslce_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     except BackendError as e:
         await update.message.reply_text(friendly_esslce_error(e))
         return
+    except Exception:
+        logger.exception("Unexpected error in esslce chat message handling")
+        await update.message.reply_text(UNEXPECTED_ERROR)
+        return
     await update.message.reply_text(screen.text, reply_markup=keyboard(screen))
     if screen.image_base64:
         photo = io.BytesIO(base64.b64decode(screen.image_base64))
         photo.name = "solution.png"
         await update.message.chat.send_photo(photo, caption=screen.image_caption)
+    if screen.extra_image_base64:
+        photo = io.BytesIO(base64.b64decode(screen.extra_image_base64))
+        photo.name = "question.png"
+        await update.message.chat.send_photo(photo, caption=screen.extra_image_caption)
 
 
 async def esslce_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -127,7 +149,22 @@ async def esslce_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except BackendError as e:
         await query.answer(friendly_esslce_error(e), show_alert=True)
         return
+    except Exception:
+        logger.exception("Unexpected error handling esslce callback %s", query.data)
+        await query.answer(UNEXPECTED_ERROR, show_alert=True)
+        try:
+            await query.edit_message_text(UNEXPECTED_ERROR)
+        except BadRequest:
+            pass
+        return
     await query.answer()
     if screen is None:  # e.g. the student tapped the same answer twice
         return
-    await _show(query, screen)
+    try:
+        await _show(query, screen)
+    except Exception:
+        logger.exception("Unexpected error showing esslce screen for %s", query.data)
+        try:
+            await query.edit_message_text(UNEXPECTED_ERROR)
+        except BadRequest:
+            pass

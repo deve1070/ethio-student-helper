@@ -14,10 +14,10 @@ from types import SimpleNamespace
 
 from auth.dependencies import get_current_user
 from config import constants
-from config.constants import CALCULATION_SUBJECTS, ESSLCE_SKILL_STRAND_SUBJECTS
+from config.constants import CALCULATION_SUBJECTS, ESSLCE_SKILL_STRAND_SUBJECTS, subject_visible
 from db.models import User
 from db.session import get_db
-from exams.latex_render import render_latex_png
+from exams.latex_render import contains_latex_math, render_latex_png
 from exams.models import EsslceAttempt, EsslcePaper, EsslcePassage, EsslceQuestion, EsslceTopicLink
 from exams.store import (
     MIN_ATTEMPTS_FOR_SIGNAL,
@@ -36,12 +36,13 @@ from exams.store import (
 )
 from fastapi import APIRouter, Depends, HTTPException
 from llm.client import LLMClient
+from payments.entitlement import check_entitlement, record_free_action
 from practice.selection import classify_level, daily_trend, pick_questions
 from pydantic import BaseModel, Field
 from retriever.builder import RetrieverBuilder
 from retriever import vectorstore
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from typing import Literal
 
 router = APIRouter(prefix="/v1/esslce", tags=["esslce"])
@@ -66,6 +67,7 @@ class EsslceQuestionOut(BaseModel):
     year_ec: int  # which exam this question is from, alongside item_no - needed once
     # questions from several years are pooled together (e.g. "practice by unit")
     booklet_code: str | None = None  # which printed/shuffled copy, when the source paper has one
+    section: str | None = None  # the section heading + directions this question's own group was printed under
     stem: str
     options: list[str]
     passage_text: str | None = None
@@ -73,6 +75,10 @@ class EsslceQuestionOut(BaseModel):
     unit: str | None = None
     skill: str | None = None  # the skill-strand axis (English/SAT); unit and skill are never both set
     diagram_image_base64: str | None = None  # the real source page photo, only set for a has_diagram item
+    stem_image_base64: str | None = None  # the stem+options rendered as one image, only set when either
+    # contains LaTeX math a plain Telegram text message can't render (the web app ignores this field -
+    # it already renders the same math client-side via MathText/KaTeX, same as explanation_image_base64/
+    # content_image_base64 below, which exist purely for the bot's benefit too)
 
 
 class NextRequest(BaseModel):
@@ -174,6 +180,7 @@ class MistakeItem(BaseModel):
     item_no: int
     year_ec: int
     booklet_code: str | None = None
+    section: str | None = None
     stem: str
     options: list[str]
     passage_text: str | None = None  # a Reading Comprehension item's passage - must always precede the stem
@@ -216,8 +223,14 @@ def mistakes(
     )
     if not wrong_ids:
         return []
+    # Same N+1 fix as _build_outputs below: best_unit(q) reads q.links, and q.paper.* is read directly
+    # a few lines down - both lazy-loaded without this.
     questions = {
-        q.id: q for q in db.query(EsslceQuestion).filter(EsslceQuestion.id.in_(wrong_ids)).all()
+        q.id: q
+        for q in db.query(EsslceQuestion)
+        .options(joinedload(EsslceQuestion.paper), selectinload(EsslceQuestion.links))
+        .filter(EsslceQuestion.id.in_(wrong_ids))
+        .all()
     }
     passage_ids = {q.passage_id for q in questions.values() if q.passage_id}
     passages = {
@@ -242,6 +255,7 @@ def mistakes(
                 item_no=q.item_no,
                 year_ec=q.paper.year_ec,
                 booklet_code=q.paper.booklet_code,
+                section=q.section,
                 stem=q.stem,
                 options=list(q.options or []),
                 passage_text=passage.text if passage else None,
@@ -281,6 +295,24 @@ class ExamSummaryResponse(BaseModel):
 
 # ---- helpers --------------------------------------------------------------
 def _build_outputs(db: Session, questions: list[EsslceQuestion]) -> list[EsslceQuestionOut]:
+    # best_unit(q) below reads q.links, and this function itself reads q.paper.* - both relationships
+    # default to lazy="select", so without eager loading, every question served here costs 2 extra
+    # round trips (confirmed live: /next's default count=5 took ~5.5s before this fix, on a connection
+    # with ~500ms round-trip latency - the same N+1 pattern just fixed in exams/store.py's
+    # student_progress). Every /next, /diagnostic, and paper-mode caller ends up here, so eager-loading
+    # once at this shared choke point - by re-querying the same ids with the relationships attached -
+    # fixes it for all of them at once rather than requiring each caller to remember to.
+    ids = [q.id for q in questions]
+    if ids:
+        by_id = {
+            q.id: q
+            for q in db.query(EsslceQuestion)
+            .options(joinedload(EsslceQuestion.paper), selectinload(EsslceQuestion.links))
+            .filter(EsslceQuestion.id.in_(ids))
+            .all()
+        }
+        questions = [by_id[q.id] for q in questions if q.id in by_id]
+
     passage_ids = {q.passage_id for q in questions if q.passage_id}
     passages = {}
     if passage_ids:
@@ -297,19 +329,28 @@ def _build_outputs(db: Session, questions: list[EsslceQuestion]) -> list[EsslceQ
             png = question_page_image(q)
             if png:
                 image_b64 = base64.b64encode(png).decode()
+        options = list(q.options or [])
+        stem_image_b64 = None
+        if contains_latex_math(q.stem) or any(contains_latex_math(o) for o in options):
+            lettered = "\n".join(f"{L}) {opt}" for L, opt in zip("ABCD", options))
+            png = render_latex_png(f"{q.stem}\n\n{lettered}")
+            if png:
+                stem_image_b64 = base64.b64encode(png).decode()
         out.append(
             EsslceQuestionOut(
                 id=q.id,
                 item_no=q.item_no,
                 year_ec=q.paper.year_ec,
                 booklet_code=q.paper.booklet_code,
+                section=q.section,
                 stem=q.stem,
-                options=list(q.options or []),
+                options=options,
                 passage_text=passage.text if passage else None,
                 passage_title=passage.title if passage else None,
                 unit=unit_info[1] if unit_info else None,
                 skill=skill_strand(q) if unit_info is None else None,
                 diagram_image_base64=image_b64,
+                stem_image_base64=stem_image_b64,
             )
         )
     return out
@@ -334,7 +375,13 @@ def subjects(db: Session = Depends(get_db), user: User = Depends(get_current_use
         .group_by(EsslcePaper.subject)
         .all()
     )
-    return {"subjects": [{"subject": s, "questions": n} for s, n in sorted(rows)]}
+    # A natural-science student never sees a social-only subject and vice versa - subject_visible()
+    # (config/constants.py) is the one shared definition of "which subjects this stream may see",
+    # also used by Practice's and Study Notes' own /subjects and by /v1/auth/me's subjects_selected
+    # validation. Grades 9-10 (no stream yet) get every subject, same as today.
+    return {
+        "subjects": [{"subject": s, "questions": n} for s, n in sorted(rows) if subject_visible(s, user.stream)]
+    }
 
 
 @router.get("/papers")
@@ -381,6 +428,55 @@ def papers(
             status_code=404, detail=f"No ESSLCE papers ready for students in '{subject}' yet."
         )
     return {"subject": subject, "papers": rows}
+
+
+class ExamCoverResponse(BaseModel):
+    paper_id: int
+    subject: str
+    year_ec: int
+    stream: str | None = None
+    region: str | None = None
+    round: str | None = None
+    item_count: int
+    sections: list[str]  # this paper's own section headings + directions, in item order, de-duplicated
+
+
+@router.get("/papers/{paper_id}/cover", response_model=ExamCoverResponse)
+def paper_cover(
+    paper_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> ExamCoverResponse:
+    """What a mock-exam start page shows before the student begins: the paper's own identity and its
+    own section directions, exactly as printed - never a fabricated booklet code or time limit (the
+    source papers behind these questions leave those as unfilled placeholders, so there is no real
+    value to show)."""
+    paper = db.query(EsslcePaper).filter(EsslcePaper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found.")
+    questions = (
+        db.query(EsslceQuestion)
+        .join(EsslcePaper, EsslceQuestion.paper_id == EsslcePaper.id)
+        .filter(EsslceQuestion.paper_id == paper_id, eligible_filter())
+        .order_by(EsslceQuestion.item_no)
+        .all()
+    )
+    if not questions:
+        raise HTTPException(status_code=404, detail="No eligible questions for this paper yet.")
+    sections: list[str] = []
+    seen: set[str] = set()
+    for q in questions:
+        if q.section and q.section not in seen:
+            seen.add(q.section)
+            sections.append(q.section)
+    return ExamCoverResponse(
+        paper_id=paper.id,
+        subject=paper.subject,
+        year_ec=paper.year_ec,
+        stream=paper.stream or None,
+        region=paper.region or None,
+        round=paper.round or None,
+        item_count=len(questions),
+        sections=sections,
+    )
 
 
 @router.get("/units")
@@ -597,6 +693,9 @@ def elaborate(
         raise HTTPException(status_code=404, detail="Question not found or no longer available.")
     paper = db.get(EsslcePaper, question.paper_id)
 
+    # Dedup key is the question itself - re-opening an elaboration already unlocked stays free.
+    needs_charge = check_entitlement(db, user, "elaborate", str(request.question_id))
+
     row = get_or_create_elaboration(
         db, LLMClient(temperature=0, max_tokens=1500), _fresh_textbook_store(), paper, question
     )
@@ -605,6 +704,9 @@ def elaborate(
             status_code=422,
             detail="Could not generate a grounded explanation for this question. Try again later.",
         )
+
+    if needs_charge:
+        record_free_action(db, user, "elaborate", str(request.question_id))
 
     image_b64 = None
     if row.is_calculation:
@@ -645,6 +747,12 @@ def ask(
         raise HTTPException(status_code=404, detail="Question not found or no longer available.")
     paper = db.get(EsslcePaper, question.paper_id)
 
+    # Every message is a genuinely new LLM call (never cached, per this endpoint's own docstring
+    # above) - no resource_key dedup, every call consumes a free action when unsubscribed. This
+    # is independent of /elaborate's own dedup even though both reuse get_or_create_elaboration
+    # for grounding context below - they stay separately billable actions by design.
+    needs_charge = check_entitlement(db, user, "ask", None)
+
     llm = LLMClient(temperature=0, max_tokens=1500)
     elaboration = get_or_create_elaboration(db, llm, _fresh_textbook_store(), paper, question)
     history = [
@@ -655,6 +763,9 @@ def ask(
     reply = ask_about_question(llm, question, elaboration, history, request.message)
     if not reply:
         raise HTTPException(status_code=422, detail="Could not generate a reply. Try again.")
+
+    if needs_charge:
+        record_free_action(db, user, "ask", None)
 
     image_b64 = None
     if paper.subject in CALCULATION_SUBJECTS:

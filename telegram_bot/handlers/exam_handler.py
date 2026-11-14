@@ -9,14 +9,18 @@ All paths hit the same cache-first /v1/exam/solve endpoint, so a question anothe
 already asked comes back instantly regardless of which way this one was submitted.
 """
 
+import asyncio
 import base64
+import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from telegram_bot import api_client
 from telegram_bot.api_client import BackendError
-from telegram_bot.handlers.explain_handler import format_answer, friendly_error
+from telegram_bot.handlers.explain_handler import UNEXPECTED_ERROR, format_answer, friendly_error
+
+logger = logging.getLogger(__name__)
 
 FLOW_KEY = "exam_flow"  # context.user_data entry while a grade/subject has been picked
 # by button but the question itself (typed or photographed) hasn't arrived yet.
@@ -77,7 +81,10 @@ async def exam_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if kind == "xg":
         grade = int(value)
         context.user_data[FLOW_KEY] = {"grade": grade}
-        subjects = [s["subject"] for s in api_client.practice_subjects(telegram_user_id, grade)["subjects"]]
+        subjects = [
+            s["subject"]
+            for s in (await asyncio.to_thread(api_client.practice_subjects, telegram_user_id, grade))["subjects"]
+        ]
         if not subjects:
             await query.edit_message_text(
                 f"No subjects available for Grade {grade} yet. Try /exam {grade} <subject> <question> directly."
@@ -168,7 +175,8 @@ async def _solve_and_reply(
         "Checking if this question's been answered before..."
     )
     try:
-        result = api_client.exam_solve(
+        result = await asyncio.to_thread(
+            api_client.exam_solve,
             telegram_user_id,
             grade,
             subject,
@@ -178,17 +186,21 @@ async def _solve_and_reply(
     except BackendError as e:
         if e.status_code == 402:
             await update.message.reply_text(
-                "You're out of credits for new exam questions. Use /buy to get more."
+                "You've used all your free previews for new exam questions. Use /subscribe for unlimited access."
             )
             return
         await update.message.reply_text(friendly_error(e))
+        return
+    except Exception:
+        logger.exception("Unexpected error in /exam solve")
+        await update.message.reply_text(UNEXPECTED_ERROR)
         return
 
     prefix = {
         "cache": "(Answered before, instant)",
         "generated": "(New answer, generated just now)",
-        "unverified": "(New answer. It could not be double-checked, so no credit was used)",
-        "no_match": "(Your textbooks don't cover this question, so no credit was used)",
+        "unverified": "(New answer. It could not be double-checked, so it didn't cost you a free preview)",
+        "no_match": "(Your textbooks don't cover this question, so it didn't cost you a free preview)",
     }.get(result["source"], "(New answer)")
     await update.message.reply_text(
         f"{prefix}\n\n" + format_answer(result["answer"], result["citations"])

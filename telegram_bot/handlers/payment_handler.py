@@ -1,8 +1,8 @@
 """
-/credits — show current balance and, if applicable, subscription status
-/buy <bundle> — shows manual-transfer instructions for that bundle
+/status — show subscription status, or how many free previews are left
+/subscribe — shows manual-transfer instructions for the one-year plan
 
-Send a photo with caption "/submit_receipt <bundle> <transaction_id>" to submit proof of payment.
+Send a photo with caption "/submit_receipt <transaction_id>" to submit proof of payment.
 The backend checks it automatically first (reads the receipt, compares the transaction id and
 amount against what you typed) and only falls back to a human admin when it isn't confident -
 see backend/payments/receipt_verification.py.
@@ -13,100 +13,74 @@ The same Approve/Reject buttons also appear on the notification pushed straight 
 chat the moment a receipt needs review (backend/payments/admin_notify.py) - both call the same
 payment_review_callback below.
 """
+import asyncio
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from telegram_bot import api_client
 from telegram_bot.api_client import BackendError
 
-# Duplicated from backend/api/routes_payments.py's CREDIT_BUNDLES deliberately - this is display
-# text for a different process (the bot) reached only over HTTP; the backend stays the only place
-# that actually prices or validates a bundle.
-BUNDLES_HELP = "Available bundles: bundle_5 (5 credits, 25 ETB), bundle_20 (20 credits, 90 ETB)"
-BUNDLE_AMOUNTS_ETB = {"bundle_5": 25.0, "bundle_20": 90.0}
+# Duplicated from backend/api/routes_payments.py's SUBSCRIPTION_PLAN deliberately - this is
+# display text for a different process (the bot) reached only over HTTP; the backend stays the
+# only place that actually prices or validates a plan.
+SUBSCRIPTION_AMOUNT_ETB = 300.0
 
 # The business's own receiving accounts - public by design (every student needs these to pay),
 # not a secret, so plain module constants rather than something from settings/.env.
 TELEBIRR_NUMBER = "0909575318"
 CBE_ACCOUNT_NUMBER = "1000198942948"
 
-
-def _buy_instructions(bundle: str) -> str:
-    amount = BUNDLE_AMOUNTS_ETB[bundle]
-    return (
-        f"To buy {bundle}:\n"
-        f"1. Send {amount:.0f} ETB to either:\n"
-        f"   • Telebirr: {TELEBIRR_NUMBER}\n"
-        f"   • CBE: {CBE_ACCOUNT_NUMBER}\n"
-        f"2. Send a photo of the receipt here with this exact caption:\n"
-        f"   /submit_receipt {bundle} <the transaction id from your receipt>\n\n"
-        "Most receipts are verified automatically within seconds; if the photo isn't clear "
-        "enough to read, an admin will check it manually instead."
-    )
+SUBSCRIBE_INSTRUCTIONS = (
+    f"One payment, a full year of unlimited access:\n"
+    f"1. Send {SUBSCRIPTION_AMOUNT_ETB:.0f} ETB to either:\n"
+    f"   • Telebirr: {TELEBIRR_NUMBER}\n"
+    f"   • CBE: {CBE_ACCOUNT_NUMBER}\n"
+    f"2. Send a photo of the receipt here with this exact caption:\n"
+    f"   /submit_receipt <the transaction id from your receipt>\n\n"
+    "Most receipts are verified automatically within seconds; if the photo isn't clear "
+    "enough to read, an admin will check it manually instead."
+)
 
 
-def _bundle_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{bundle} ({BUNDLE_AMOUNTS_ETB[bundle]:.0f} ETB)", callback_data=f"by|{bundle}")]
-        for bundle in BUNDLE_AMOUNTS_ETB
-    ])
-
-
-async def credits_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # effective_message, not message: also called from bot.py's menu_callback with a
-    # CallbackQuery-type Update when the main menu's My Credits button is tapped.
+    # CallbackQuery-type Update when the main menu's My Status button is tapped.
     telegram_user_id = update.effective_user.id
     if not api_client.is_logged_in(telegram_user_id):
         await update.effective_message.reply_text("Please /login first with your phone/email and password.")
         return
 
     try:
-        data = api_client.get_credits(telegram_user_id)
+        data = await asyncio.to_thread(api_client.get_entitlement, telegram_user_id)
     except BackendError:
-        await update.effective_message.reply_text("Couldn't check your balance right now — try again shortly.")
+        await update.effective_message.reply_text("Couldn't check your status right now — try again shortly.")
         return
 
     if data["has_active_subscription"]:
-        await update.effective_message.reply_text("You have an active subscription — unlimited exam solves.")
+        await update.effective_message.reply_text(
+            "You have an active subscription — unlimited access to every AI feature."
+        )
     else:
-        await update.effective_message.reply_text(f"You have {data['balance']} credit(s) remaining.\n\n{BUNDLES_HELP}")
+        used, quota = data["free_actions_used"], data["free_actions_quota"]
+        await update.effective_message.reply_text(
+            f"You've used {used} of {quota} free previews.\n\n"
+            "Use /subscribe for a full year of unlimited access."
+        )
 
 
-async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # effective_message, not message: also called from bot.py's menu_callback (the main menu's
-    # Buy Credits button), which never carries typed args - that always falls into the button-
-    # picker branch below, same as typing bare /buy.
+    # Subscribe button), which carries no args either.
     telegram_user_id = update.effective_user.id
     if not api_client.is_logged_in(telegram_user_id):
         await update.effective_message.reply_text("Please /login first with your phone/email and password.")
         return
-
-    args = context.args or []
-    if not args or args[0] not in BUNDLE_AMOUNTS_ETB:
-        await update.effective_message.reply_text(
-            f"Pick a bundle:\n\n{BUNDLES_HELP}", reply_markup=_bundle_keyboard()
-        )
-        return
-
-    await update.effective_message.reply_text(_buy_instructions(args[0]))
-
-
-async def buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """The bundle buttons buy_command shows when typed with no args (or tapped from the main menu)."""
-    query = update.callback_query
-    await query.answer()
-    bundle = query.data.split("|", 1)[1]
-    try:
-        await query.edit_message_text(_buy_instructions(bundle))
-    except BadRequest as e:
-        if "not modified" not in str(e).lower():
-            raise
+    await update.effective_message.reply_text(SUBSCRIBE_INSTRUCTIONS)
 
 
 async def receipt_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """A photo sent with caption '/submit_receipt <bundle> <transaction_id>'. Silently does
-    nothing if the caption doesn't start with /submit_receipt, so it never interferes with
+    """A photo sent with caption '/submit_receipt <transaction_id>'. Silently does nothing if
+    the caption doesn't start with /submit_receipt, so it never interferes with
     exam_photo_handler's own '/exam ...'-captioned photos registered on the same update."""
     caption = update.message.caption or ""
     if not caption.startswith("/submit_receipt"):
@@ -117,13 +91,13 @@ async def receipt_photo_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("Please /login first with your phone/email and password.")
         return
 
-    parts = caption.split(maxsplit=2)
-    if len(parts) < 3 or parts[1] not in BUNDLE_AMOUNTS_ETB:
+    parts = caption.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
         await update.message.reply_text(
-            "Caption format: /submit_receipt <bundle> <transaction_id>\n\n" + BUNDLES_HELP
+            "Caption format: /submit_receipt <the transaction id from your receipt>"
         )
         return
-    bundle, transaction_id = parts[1], parts[2].strip()
+    transaction_id = parts[1].strip()
 
     photo = update.message.photo[-1]
     file = await photo.get_file()
@@ -131,7 +105,7 @@ async def receipt_photo_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     await update.message.reply_text("Checking your receipt...")
     try:
-        result = api_client.submit_receipt(telegram_user_id, bundle, transaction_id, photo_bytes)
+        result = await asyncio.to_thread(api_client.submit_receipt, telegram_user_id, transaction_id, photo_bytes)
     except BackendError as e:
         await update.message.reply_text(f"Couldn't submit that receipt: {e.detail}")
         return
@@ -157,7 +131,7 @@ async def pending_payments_command(update: Update, context: ContextTypes.DEFAULT
         return
 
     try:
-        pending = api_client.list_pending_payments(telegram_user_id)
+        pending = await asyncio.to_thread(api_client.list_pending_payments, telegram_user_id)
     except BackendError as e:
         if e.status_code == 403:
             await update.message.reply_text("This command is for admins only.")
@@ -172,7 +146,7 @@ async def pending_payments_command(update: Update, context: ContextTypes.DEFAULT
     for p in pending:
         text = (
             f"Student: {p['student_name']}\n"
-            f"Amount: {p['amount_etb']} ETB ({p['credits_granted']} credits)\n"
+            f"Amount: {p['amount_etb']} ETB\n"
             f"Submitted transaction id: {p['submitted_transaction_id']}\n"
             f"Why it needs review: {p['verification_note']}"
         )
@@ -193,10 +167,10 @@ async def payment_review_callback(update: Update, context: ContextTypes.DEFAULT_
     _, action, payment_id = query.data.split("|", 2)
     try:
         if action == "approve":
-            api_client.approve_payment(telegram_user_id, payment_id)
-            outcome = "Approved — credits added."
+            await asyncio.to_thread(api_client.approve_payment, telegram_user_id, payment_id)
+            outcome = "Approved — subscription granted/extended."
         else:
-            api_client.reject_payment(telegram_user_id, payment_id)
+            await asyncio.to_thread(api_client.reject_payment, telegram_user_id, payment_id)
             outcome = "Rejected."
     except BackendError as e:
         if e.status_code == 403:

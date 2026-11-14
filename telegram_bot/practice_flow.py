@@ -15,6 +15,10 @@ class Screen:
     image_base64: str | None = None  # set by esslce_flow for a rendered LaTeX explanation; sent as a photo
     image_caption: str | None = None  # self-contained verdict+options, sent as that photo's caption -
     # not reliant on staying next to `text`'s separate message if a slow upload lands out of order
+    extra_image_base64: str | None = None  # a SECOND photo, sent after the first - esslce_flow's
+    # feedback screen can have both an explanation image (above) and a math-bearing question/options
+    # image at once; each gets its own self-contained caption for the same reason as image_caption.
+    extra_image_caption: str | None = None
 
 
 def pretty_subject(subject: str) -> str:

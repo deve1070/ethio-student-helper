@@ -172,6 +172,13 @@ def wrap_as_math(formula: str) -> str:
     return f"\\[{inner.strip()}\\]"
 
 
+def contains_latex_math(text: str | None) -> bool:
+    """True if `text` has at least one LaTeX math span render_latex_png would recognize - the
+    exact same delimiter set (`_BLOCK`), so "does this need rendering" and "how to render it"
+    stay defined by one regex, not two that could drift apart."""
+    return bool(text) and _BLOCK.search(text) is not None
+
+
 def render_latex_png(text: str, fontsize: int = 13, max_chars_per_line: int = 46) -> bytes | None:
     """PNG bytes of `text` with its LaTeX math blocks typeset, or None if matplotlib can't parse it
     (an unsupported construct, unbalanced delimiters, etc.) - never raises past this function."""
