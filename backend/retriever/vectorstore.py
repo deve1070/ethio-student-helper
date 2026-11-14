@@ -14,6 +14,7 @@ confirmed directly against a local pgvector instance: PGVector supports the exac
 """
 
 import json
+import threading
 import time
 
 import psycopg
@@ -23,13 +24,31 @@ from config.settings import settings
 from utils.logging import logger
 
 
+_stores: dict = {}
+_stores_lock = threading.Lock()
+
+
 def get_vector_store(collection_name: str, embedding_function):
-    return PGVector(
-        embeddings=embedding_function,
-        collection_name=collection_name,
-        connection=settings.VECTOR_DATABASE_URL,
-        use_jsonb=True,
-    )
+    """One PGVector per (collection, embedding function), reused for the life of the process.
+    Constructing one creates a new SQLAlchemy engine (a new connection pool, so a fresh TCP + TLS
+    handshake to Postgres) and runs its setup queries (create extension, tables, collection) -
+    rebuilt per request, that was several database round trips before every search. Measured from
+    a dev machine: about 8s per search before, about 1.3s after the first. Reuse is safe: the store holds no
+    query state, and every search reads the table live, so newly ingested chunks still show up."""
+    key = (collection_name, id(embedding_function))
+    store = _stores.get(key)
+    if store is None:
+        with _stores_lock:
+            store = _stores.get(key)
+            if store is None:
+                store = PGVector(
+                    embeddings=embedding_function,
+                    collection_name=collection_name,
+                    connection=settings.VECTOR_DATABASE_URL,
+                    use_jsonb=True,
+                )
+                _stores[key] = store
+    return store
 
 
 def from_documents(documents, embedding, collection_name: str):

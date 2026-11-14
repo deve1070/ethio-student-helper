@@ -1,4 +1,7 @@
+import threading
 import uuid
+
+from langchain_core.embeddings import Embeddings
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import EnsembleRetriever
@@ -21,13 +24,35 @@ logger = logging.getLogger(__name__)
 # dropped further once this was shared, on top of the much larger easyocr
 # fix in exams/ocr.py). One process-wide instance, built on first use,
 # shared by every RetrieverBuilder() regardless of which module asked first.
-_embeddings = None
+class _LazyEmbeddings(Embeddings):
+    """Loads the FastEmbed model on the first embed call, not at import. Every router builds its
+    retriever at import time, so an eager model meant ~220MB of RSS (measured: 211MB at startup
+    without it, 433MB with it) held from boot, before any student had searched anything. The load
+    itself takes about a second, paid once by the first /explain, /esslce elaborate or /exam solve
+    after a restart. The lock stops two concurrent first requests from loading two copies."""
+
+    def __init__(self):
+        self._model = None
+        self._lock = threading.Lock()
+
+    def _get(self):
+        if self._model is None:
+            with self._lock:
+                if self._model is None:
+                    self._model = FastEmbedEmbeddings(model_name=settings.EMBEDDING_MODEL)
+        return self._model
+
+    def embed_documents(self, texts):
+        return self._get().embed_documents(texts)
+
+    def embed_query(self, text):
+        return self._get().embed_query(text)
+
+
+_embeddings = _LazyEmbeddings()
 
 
 def _shared_embeddings():
-    global _embeddings
-    if _embeddings is None:
-        _embeddings = FastEmbedEmbeddings(model_name=settings.EMBEDDING_MODEL)
     return _embeddings
 
 
