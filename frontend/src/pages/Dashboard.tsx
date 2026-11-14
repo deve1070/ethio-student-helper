@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { BookOpenCheck, BookText, Calendar, GraduationCap, MessageCircleQuestion, Sparkles } from "lucide-react"
+import { BookOpenCheck, BookText, Calendar, GraduationCap, MessageCircleQuestion, RotateCcw, Sparkles } from "lucide-react"
 import { Card, CardButton } from "../components/ui/Card"
 import { InstallAppCard } from "../components/ui/InstallAppCard"
 import { Spinner } from "../components/ui/Primitives"
 import { StudyPlanTaskRow } from "../components/ui/StudyPlanTaskRow"
 import { useAuth } from "../lib/auth"
-import { studyPlan, type StudyPlanResponse, type StudyPlanTask } from "../lib/api"
+import { esslce, studyPlan, type StudyPlanResponse, type StudyPlanTask } from "../lib/api"
 import { taskHref, todayIso } from "../lib/studyPlanTasks"
 
 function daysUntil(dateStr: string): number {
@@ -25,6 +25,14 @@ export function DashboardPage() {
       return false // storage can throw (private browsing, blocked cookies) - just show the banner
     }
   })
+
+  const [review, setReview] = useState<{ subject: string; due: number }[]>([])
+  useEffect(() => {
+    esslce
+      .reviewCount()
+      .then((r) => setReview(r.subjects))
+      .catch(() => setReview([])) // non-critical, same as the study plan below
+  }, [])
 
   useEffect(() => {
     studyPlan
@@ -122,6 +130,30 @@ export function DashboardPage() {
             <p className="text-sm text-white/80">{fullProfile.exam_date}</p>
           </div>
         </div>
+      )}
+
+      {review.length > 0 && (
+        <Card className="flex flex-col gap-2 p-4">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900">
+            <RotateCcw className="size-4 text-brand-600" aria-hidden /> Due for review today
+          </p>
+          <p className="text-sm text-zinc-500">
+            Questions you got wrong come back after 1, 3 and 7 days until you get them right.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {review.map((r) => (
+              <button
+                key={r.subject}
+                onClick={() =>
+                  navigate(`/esslce/${encodeURIComponent(r.subject)}/session?mode=practice&review=1`)
+                }
+                className="rounded-full bg-brand-50 px-3 py-1.5 text-sm font-medium capitalize text-brand-800 hover:bg-brand-100"
+              >
+                {r.subject.replace(/_/g, " ")} · {r.due}
+              </button>
+            ))}
+          </div>
+        </Card>
       )}
 
       <Card className="flex flex-col gap-3 p-4">

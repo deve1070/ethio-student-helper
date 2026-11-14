@@ -252,6 +252,7 @@ def esslce_next(
     grade: int | None = None,
     skill: str | None = None,
     incorrect_only: bool = False,
+    review_due: bool = False,
     count: int = 5,
 ) -> dict:
     body = {"subject": subject, "count": count}
@@ -264,6 +265,8 @@ def esslce_next(
         body["skill"] = skill
     if incorrect_only:
         body["incorrect_only"] = True
+    if review_due:
+        body["review_due"] = True
     return _post(telegram_user_id, "/v1/esslce/next", body)
 
 

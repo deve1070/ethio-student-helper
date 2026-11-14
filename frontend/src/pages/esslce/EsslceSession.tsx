@@ -20,6 +20,7 @@ export function EsslceSessionPage() {
   const mode = (params.get("mode") as EsslceMode) || "practice"
   const paperId = params.get("paperId") ? Number(params.get("paperId")) : undefined
   const incorrectOnly = params.get("incorrectOnly") === "1"
+  const reviewDue = params.get("review") === "1"
   const unit = params.get("unit") || undefined
   const skill = params.get("skill") || undefined
   const unitGrade = params.get("grade") ? Number(params.get("grade")) : undefined
@@ -55,6 +56,7 @@ export function EsslceSessionPage() {
           : esslce.next({
               subject,
               incorrect_only: incorrectOnly,
+              review_due: reviewDue,
               unit,
               skill,
               grade: unitGrade,
@@ -63,7 +65,7 @@ export function EsslceSessionPage() {
 
     request.then((r) => setQuestions(r.questions)).catch((e) => setError(errorMessage(e)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subject, mode, paperId, incorrectOnly, unit, skill, unitGrade])
+  }, [subject, mode, paperId, incorrectOnly, reviewDue, unit, skill, unitGrade])
 
   useEffect(load, [load])
 

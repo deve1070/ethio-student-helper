@@ -8,7 +8,7 @@ import random
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1621,6 +1621,49 @@ def student_progress(db, user_id, subject: str) -> dict:
         "attempted": len(latest),
         "correct": sum(latest.values()),
     }
+
+
+REVIEW_INTERVALS_DAYS = (1, 3, 7)
+
+
+def review_due(history: list, now: datetime) -> bool:
+    """Spaced review of one question for one student. `history` is that student's attempts at it,
+    oldest first, as (is_correct, created_at). A question enters review when answered wrong and
+    comes back after 1, 3, then 7 days: the gap is chosen by how many correct answers in a row
+    have followed the most recent wrong one. Three in a row and it leaves review; a wrong answer at
+    any point starts the 1-3-7 cycle again."""
+    last_wrong = max((i for i, (ok, _ts) in enumerate(history) if not ok), default=None)
+    if last_wrong is None:
+        return False
+    streak = len(history) - 1 - last_wrong
+    if streak >= len(REVIEW_INTERVALS_DAYS):
+        return False
+    return now >= history[-1][1] + timedelta(days=REVIEW_INTERVALS_DAYS[streak])
+
+
+def review_due_ids(db, user_id, subject: str | None = None) -> dict:
+    """{question_id: subject} for every question due for spaced review right now, among questions
+    still eligible to serve."""
+    query = (
+        db.query(EsslceAttempt.question_id, EsslceAttempt.is_correct, EsslceAttempt.created_at)
+        .filter(EsslceAttempt.user_id == user_id)
+        .order_by(EsslceAttempt.created_at)
+    )
+    history: dict = {}
+    for qid, ok, ts in query:
+        history.setdefault(qid, []).append((ok, ts))
+    now = datetime.utcnow()
+    due = [qid for qid, h in history.items() if review_due(h, now)]
+    if not due:
+        return {}
+    rows = (
+        db.query(EsslceQuestion.id, EsslcePaper.subject)
+        .join(EsslcePaper, EsslceQuestion.paper_id == EsslcePaper.id)
+        .filter(EsslceQuestion.id.in_(due), eligible_filter())
+    )
+    if subject is not None:
+        rows = rows.filter(EsslcePaper.subject == subject)
+    return dict(rows.all())
 
 
 def recommend_focus(progress: dict) -> dict | None:

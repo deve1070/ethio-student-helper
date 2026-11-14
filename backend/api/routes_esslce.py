@@ -33,6 +33,7 @@ from exams.store import (
     recommend_focus,
     skill_strand,
     student_progress,
+    review_due_ids,
 )
 from fastapi import APIRouter, Depends, HTTPException
 from llm.client import LLMClient
@@ -89,6 +90,7 @@ class NextRequest(BaseModel):
     grade: int | None = None  # disambiguates a unit name that recurs across grades; ignored if unit is unset
     skill: str | None = None  # pool across every year's questions in this one skill strand (English, SAT)
     incorrect_only: bool = False  # pool across every year's questions this student's LATEST attempt got wrong
+    review_due: bool = False  # only questions due for spaced review today (exams/store.py's review_due)
     count: int = Field(5, ge=1, le=50)  # ignored when paper_id is set
 
 
@@ -540,6 +542,19 @@ def diagnostic(
     return NextResponse(paper_id=None, questions=_build_outputs(db, rows))
 
 
+@router.get("/review-count")
+def review_count(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """How many questions are due for spaced review today, per subject - for the dashboard card and
+    the bot's practice menu."""
+    counts: dict = {}
+    for subject in review_due_ids(db, user.id).values():
+        counts[subject] = counts.get(subject, 0) + 1
+    return {
+        "total": sum(counts.values()),
+        "subjects": [{"subject": s, "due": n} for s, n in sorted(counts.items())],
+    }
+
+
 @router.post("/next", response_model=NextResponse)
 def next_questions(
     request: NextRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
@@ -631,6 +646,9 @@ def next_questions(
         ]
     if request.incorrect_only:
         candidates = [r for r in candidates if r.id in last and not last[r.id][0]]
+    if request.review_due:
+        due = review_due_ids(db, user.id, request.subject)
+        candidates = [r for r in candidates if r.id in due]
     if not candidates:
         return NextResponse(paper_id=None, questions=[])
 

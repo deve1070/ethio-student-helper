@@ -29,6 +29,7 @@ class EsslceSession:
         self.skills: list = []
         self.skill = None  # set only when scoped to one skill strand (practice "pick a skill" - English/SAT)
         self.incorrect_only = False  # set only in practice "review my mistakes"
+        self.review_due = False  # set only in practice "due for review" (spaced review)
         self._recommendation = None  # the weakest-area suggestion shown by _progress_screen, if any
         self.asking_question_id = None  # set only while mid-conversation in "Ask about this" chat
         self.chat_history: list = []  # [{"role": "user"|"assistant", "content": str}], capped, client-held
@@ -84,6 +85,7 @@ class EsslceSession:
         self.unit = self.unit_grade = None
         self.skill = None
         self.incorrect_only = False
+        self.review_due = False
         self._recommendation = None
         self.subjects = self.api.esslce_subjects(self.user_id)["subjects"]
         if not self.subjects:
@@ -107,6 +109,7 @@ class EsslceSession:
                     [("📚 Pick a unit", "epc|unit")],
                     [("🎯 Pick a skill", "epc|skill")],
                     [("❌ Review my mistakes", "epc|incorrect")],
+                    [("🔁 Due for review today", "epc|review")],
                     [("📊 My Progress", "epc|progress")],
                     [("‹ Back", "em|practice")],
                 ],
@@ -134,20 +137,38 @@ class EsslceSession:
             self.unit = self.unit_grade = None
             self.skill = None
             self.incorrect_only = False
+            self.review_due = False
             return self._papers_screen(back="em|practice")
         if choice == "unit":
             self.paper_id = self.paper_year = None
             self.skill = None
             self.incorrect_only = False
+            self.review_due = False
             return self._units_screen()
         if choice == "skill":
             self.paper_id = self.paper_year = None
             self.unit = self.unit_grade = None
             self.incorrect_only = False
+            self.review_due = False
             return self._skills_screen()
         if choice == "progress":
             self.paper_id = self.paper_year = None
             return self._progress_screen()
+        if choice == "review":
+            self.paper_id = self.paper_year = None
+            self.unit = self.unit_grade = None
+            self.skill = None
+            self.incorrect_only = False
+            self.review_due = True
+            self.queue, self.current = [], None
+            self._refill()
+            if not self.queue:
+                return Screen(
+                    "Nothing due for review in this subject today. Questions you get wrong come back "
+                    "after 1, 3 and 7 days until you've got them right three times in a row.",
+                    [[("‹ Back", "em|practice")]],
+                )
+            return self._question_screen()
         if choice == "incorrect":
             self.paper_id = self.paper_year = None
             self.unit = self.unit_grade = None
@@ -169,6 +190,7 @@ class EsslceSession:
         self.unit = self.unit_grade = None
         self.skill = None
         self.incorrect_only = False
+        self.review_due = False
         self.queue, self.current = [], None
         self._refill()
         if not self.queue:
@@ -210,6 +232,7 @@ class EsslceSession:
         self.unit, self.unit_grade = u["unit"], u["grade"]
         self.skill = None
         self.incorrect_only = False
+        self.review_due = False
         self.queue, self.current = [], None
         self._refill()
         if not self.queue:
@@ -239,6 +262,7 @@ class EsslceSession:
         self.skill = self.skills[index]["skill"]
         self.unit = self.unit_grade = None
         self.incorrect_only = False
+        self.review_due = False
         self.queue, self.current = [], None
         self._refill()
         if not self.queue:
@@ -292,6 +316,7 @@ class EsslceSession:
             raise FlowError("This menu has expired. Send /esslce to start again.")
         self.paper_id = self.paper_year = None
         self.incorrect_only = False
+        self.review_due = False
         if rec["kind"] == "unit":
             self.unit, self.unit_grade = rec["unit"], rec["grade"]
             self.skill = None
@@ -315,6 +340,7 @@ class EsslceSession:
         self.unit = self.unit_grade = None
         self.skill = None
         self.incorrect_only = False
+        self.review_due = False
         self.queue, self.current = [], None
         self.exam_results = []
         self.answered = self.correct = 0
@@ -334,6 +360,7 @@ class EsslceSession:
             grade=self.unit_grade,
             skill=self.skill,
             incorrect_only=self.incorrect_only,
+            review_due=self.review_due,
             count=BATCH,
         )
         # never repeat a question inside one session

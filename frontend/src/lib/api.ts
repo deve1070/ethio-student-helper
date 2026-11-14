@@ -371,6 +371,7 @@ export const esslce = {
     grade?: number
     skill?: string
     incorrect_only?: boolean
+    review_due?: boolean
     count?: number
   }) => post<{ paper_id: number | null; questions: EsslceQuestion[] }>("/v1/esslce/next", args),
   answer: (question_id: number, chosen_index: number, mode: EsslceMode) =>
@@ -383,6 +384,8 @@ export const esslce = {
       message,
       history,
     }),
+  reviewCount: () =>
+    get<{ total: number; subjects: { subject: string; due: number }[] }>("/v1/esslce/review-count"),
   examSummary: (paper_id: number) => post<ExamSummary>("/v1/esslce/exam-summary", { paper_id }),
 }
 
