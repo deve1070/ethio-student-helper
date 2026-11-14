@@ -49,6 +49,7 @@ if settings.SENTRY_DSN:
     import sentry_sdk
 
     sentry_sdk.init(dsn=settings.SENTRY_DSN, environment=settings.ENVIRONMENT, traces_sample_rate=0.0)
+    sentry_sdk.set_tag("service", "backend")
 
 app = FastAPI(title="Ethiopian Student Helper API", version="0.1.0")
 

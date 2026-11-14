@@ -118,6 +118,38 @@ domain) and redeploy - CORS needs the real frontend origin to let it through.
 - `/start` the bot on Telegram, `/login` - confirms the bot service is up and can
   reach the backend.
 
+## 6. Monitoring and backups
+
+**Errors (Sentry).** Create a free project at sentry.io (platform: Python) and set the same
+`SENTRY_DSN` on both Railway services, plus `ENVIRONMENT=production` on the bot service too. The
+backend reports unhandled errors; the bot reports every error it logs (a failed send, a failed
+backend call, a job that crashed). Events are tagged `service: backend` or `service: telegram_bot`.
+
+**Uptime.** Create a free monitor at uptimerobot.com: type HTTP(s), URL
+`<railway-backend-url>/health`, every 5 minutes, alerting your email or Telegram. `/health` checks
+both database connections and returns 503 if either is down, so it catches a database outage as
+well as the server itself.
+
+**Database backups.** `.github/workflows/backup.yml` runs every night at 02:30 Addis Ababa time and
+on demand (Actions → Nightly database backup → Run workflow). It dumps the app's tables (the
+`public` schema), encrypts the dump with your passphrase, and keeps it for 14 days as a workflow
+artifact. Add two repository secrets (Settings → Secrets and variables → Actions):
+
+- `BACKUP_DATABASE_URL`: the Supabase connection string in plain `postgresql://...` form.
+- `BACKUP_PASSPHRASE`: a long random string. Keep a copy somewhere other than GitHub; without it
+  the backups can't be opened.
+
+Run it once by hand after adding the secrets and check that the run succeeds. To restore, download
+the artifact and run:
+
+```
+gpg -d esh-YYYYMMDD.dump.gpg > esh.dump
+pg_restore --clean --if-exists --no-owner -d "<postgresql://... connection string>" esh.dump
+```
+
+`--clean` replaces the existing tables. To inspect a backup without touching production, restore
+it into a separate database instead.
+
 ## Alternative: Render (backend only, no bot worker)
 
 Kept for reference - Render's free tier can't run the bot as an always-on worker,

@@ -1,0 +1,40 @@
+name: Nightly database backup
+
+# A pg_dump of the app's own tables (the public schema), encrypted with a passphrase and kept as a
+# workflow artifact for 14 days. Repository secrets needed:
+#   BACKUP_DATABASE_URL  plain postgresql:// connection string (no +psycopg2), session pooler or direct
+#   BACKUP_PASSPHRASE    long random string; keep a copy outside GitHub, it is needed to restore
+# Restore steps are in DEPLOY.md.
+on:
+  schedule:
+    - cron: "30 23 * * *" # 02:30 in Addis Ababa
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Dump and encrypt
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DATABASE_URL" ] || [ -z "$PASSPHRASE" ]; then
+            echo "BACKUP_DATABASE_URL and BACKUP_PASSPHRASE secrets must both be set"; exit 1
+          fi
+          file="esh-$(date -u +%Y%m%d).dump"
+          # the dump tool's major version must be at least the server's (Supabase runs Postgres 17)
+          docker run --rm postgres:17 pg_dump --format=custom --no-owner --no-privileges \
+            --schema=public "$DATABASE_URL" > "$file"
+          gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 \
+            --passphrase "$PASSPHRASE" -o "$file.gpg" "$file"
+          rm "$file"
+          ls -lh "$file.gpg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: "*.dump.gpg"
+          retention-days: 14
+          if-no-files-found: error

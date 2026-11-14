@@ -2,3 +2,4 @@ python-telegram-bot[job-queue]==21.9
 httpx==0.28.1
 python-dotenv==1.0.1
  
+sentry-sdk==2.19.2

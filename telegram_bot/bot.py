@@ -1,4 +1,5 @@
 import logging
+import os
 
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -246,6 +247,14 @@ def main() -> None:
     # httpx logs every request URL at INFO, and a Telegram Bot API URL contains the bot token -
     # at INFO the token was written to the log on every single request.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    if os.environ.get("SENTRY_DSN"):
+        # Same project as the backend (both read SENTRY_DSN from the shared .env), told apart by the
+        # "service" tag. Sentry's logging integration reports every logger.exception() call, which
+        # is how the bot already records a failed send, a failed backend call or a job error.
+        import sentry_sdk
+
+        sentry_sdk.init(dsn=os.environ["SENTRY_DSN"], environment=os.environ.get("ENVIRONMENT", "development"))
+        sentry_sdk.set_tag("service", "telegram_bot")
     build_application().run_polling()
 
 
