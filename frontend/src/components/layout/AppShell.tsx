@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom"
 import clsx from "clsx"
 import { FullPageSpinner } from "../ui/Primitives"
 import { BarChart3, BookOpenCheck, GraduationCap, Home, Trophy, User, Wallet } from "lucide-react"
+import { useI18n } from "../../lib/i18n"
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -34,6 +35,7 @@ function currentTitle(pathname: string): string {
 
 export function AppShell() {
   const location = useLocation()
+  const { t } = useI18n()
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-xl flex-col bg-[#f7f8f7]">
@@ -41,7 +43,7 @@ export function AppShell() {
         className="sticky top-0 z-10 flex h-14 shrink-0 items-center border-b border-zinc-200/70 bg-white/90 px-4 backdrop-blur"
         style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
-        <h1 className="text-[17px] font-semibold text-zinc-900">{currentTitle(location.pathname)}</h1>
+        <h1 className="text-[17px] font-semibold text-zinc-900">{t(currentTitle(location.pathname))}</h1>
       </header>
 
       <main className="flex-1 overflow-y-auto px-4 py-5">
@@ -69,7 +71,7 @@ export function AppShell() {
             {({ isActive }) => (
               <>
                 <Icon className="size-5" strokeWidth={isActive ? 2.25 : 2} aria-hidden />
-                {label}
+                {t(label)}
               </>
             )}
           </NavLink>

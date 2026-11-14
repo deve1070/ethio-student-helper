@@ -5,9 +5,11 @@ import { Button } from "../../components/ui/Button"
 import { Field, PasswordInput, TextInput, ErrorBanner } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
 import { errorMessage } from "../../lib/api"
+import { LanguageSwitch, useI18n } from "../../lib/i18n"
 
 export function LoginPage() {
   const { login } = useAuth()
+  const { t } = useI18n()
   const navigate = useNavigate()
   const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
@@ -31,19 +33,22 @@ export function LoginPage() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-[#f7f8f7] px-5">
       <div className="w-full max-w-sm">
+        <div className="mb-4 flex justify-end">
+          <LanguageSwitch />
+        </div>
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <div className="flex size-14 items-center justify-center rounded-2xl bg-brand-600">
             <GraduationCap className="size-7 text-white" aria-hidden />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900">Welcome back</h1>
-            <p className="mt-1 text-sm text-zinc-500">Log in to continue studying.</p>
+            <h1 className="text-xl font-semibold text-zinc-900">{t("Welcome back")}</h1>
+            <p className="mt-1 text-sm text-zinc-500">{t("Log in to continue studying.")}</p>
           </div>
         </div>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           {error && <ErrorBanner message={error} />}
-          <Field label="Phone or email" htmlFor="identifier">
+          <Field label={t("Phone or email")} htmlFor="identifier">
             <TextInput
               id="identifier"
               autoComplete="username"
@@ -52,7 +57,7 @@ export function LoginPage() {
               required
             />
           </Field>
-          <Field label="Password" htmlFor="password">
+          <Field label={t("Password")} htmlFor="password">
             <PasswordInput
               id="password"
               autoComplete="current-password"
@@ -62,20 +67,20 @@ export function LoginPage() {
             />
           </Field>
           <Button type="submit" size="lg" fullWidth loading={loading}>
-            Log in
+            {t("Log in")}
           </Button>
         </form>
 
         <p className="mt-4 text-center text-sm">
           <Link to="/forgot-password" className="font-medium text-brand-700 hover:underline">
-            Forgot password?
+            {t("Forgot password?")}
           </Link>
         </p>
 
         <p className="mt-6 text-center text-sm text-zinc-500">
-          New here?{" "}
+          {t("New here?")}{" "}
           <Link to="/signup" className="font-medium text-brand-700 hover:underline">
-            Create an account
+            {t("Create an account")}
           </Link>
         </p>
       </div>

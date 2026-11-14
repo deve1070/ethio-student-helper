@@ -7,6 +7,7 @@ import { InstallAppCard } from "../components/ui/InstallAppCard"
 import { TelegramIcon } from "../components/ui/icons/TelegramIcon"
 import { Badge } from "../components/ui/Primitives"
 import { useAuth } from "../lib/auth"
+import { LanguageSwitch, useI18n } from "../lib/i18n"
 
 function daysUntil(dateStr: string): number {
   const ms = new Date(dateStr + "T00:00:00").getTime() - new Date().setHours(0, 0, 0, 0)
@@ -17,6 +18,7 @@ const GOAL_LABELS: Record<number, string> = { 30: "30 minutes", 60: "1 hour", 12
 
 export function ProfilePage() {
   const { logout, gradeLevel, fullProfile } = useAuth()
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
 
   async function copyReferralCode() {
@@ -247,8 +249,13 @@ export function ProfilePage() {
         </Card>
       )}
 
+      <Card className="flex items-center justify-between gap-3 p-4">
+        <p className="text-sm font-semibold text-zinc-900">{t("Language")}</p>
+        <LanguageSwitch />
+      </Card>
+
       <Button variant="secondary" onClick={logout}>
-        <LogOut className="size-4" aria-hidden /> Log out
+        <LogOut className="size-4" aria-hidden /> {t("Log out")}
       </Button>
     </div>
   )

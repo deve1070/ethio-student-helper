@@ -9,6 +9,7 @@ import { StudyPlanTaskRow } from "../components/ui/StudyPlanTaskRow"
 import { useAuth } from "../lib/auth"
 import { esslce, studyPlan, type StudyPlanResponse, type StudyPlanTask } from "../lib/api"
 import { taskHref, todayIso } from "../lib/studyPlanTasks"
+import { useI18n } from "../lib/i18n"
 
 function daysUntil(dateStr: string): number {
   const ms = new Date(dateStr + "T00:00:00").getTime() - new Date().setHours(0, 0, 0, 0)
@@ -18,6 +19,7 @@ function daysUntil(dateStr: string): number {
 export function DashboardPage() {
   const navigate = useNavigate()
   const { gradeLevel, fullProfile } = useAuth()
+  const { t } = useI18n()
   const [week, setWeek] = useState<StudyPlanResponse | null | undefined>(undefined)
   const [installDismissed, setInstallDismissed] = useState(() => {
     try {
@@ -74,29 +76,29 @@ export function DashboardPage() {
   const tiles = [
     {
       icon: MessageCircleQuestion,
-      title: "Ask a question",
-      description: "Get a grounded explanation from your Grade " + gradeLevel + " textbooks.",
+      title: t("Ask a question"),
+      description: t("Get a grounded explanation from your Grade {n} textbooks.", { n: gradeLevel }),
       to: "/explain",
       color: "bg-brand-600",
     },
     {
       icon: BookOpenCheck,
-      title: "Practice",
-      description: "Multiple-choice questions from your textbooks, by subject and unit.",
+      title: t("Practice"),
+      description: t("Multiple-choice questions from your textbooks, by subject and unit."),
       to: "/practice",
       color: "bg-accent-500",
     },
     {
       icon: GraduationCap,
-      title: "ESSLCE exam bank",
-      description: "Grade 12 national exam past papers - practice, mock exams, and diagnostics.",
+      title: t("ESSLCE exam bank"),
+      description: t("Grade 12 national exam past papers - practice, mock exams, and diagnostics."),
       to: "/esslce",
       color: "bg-zinc-800",
     },
     {
       icon: BookText,
-      title: "Study notes",
-      description: "Topic summaries, key formulas, and worked examples from your textbooks.",
+      title: t("Study notes"),
+      description: t("Topic summaries, key formulas, and worked examples from your textbooks."),
       to: "/notes",
       color: "bg-emerald-600",
     },
@@ -125,8 +127,8 @@ export function DashboardPage() {
           <div>
             <p className="text-lg font-semibold leading-tight">
               {daysUntil(fullProfile.exam_date) >= 0
-                ? `${daysUntil(fullProfile.exam_date)} days to your ESSLCE`
-                : "Your ESSLCE date has passed"}
+                ? t("{n} days to your ESSLCE", { n: daysUntil(fullProfile.exam_date) })
+                : t("Your ESSLCE date has passed")}
             </p>
             <p className="text-sm text-white/80">{fullProfile.exam_date}</p>
           </div>
@@ -138,10 +140,10 @@ export function DashboardPage() {
       {review.length > 0 && (
         <Card className="flex flex-col gap-2 p-4">
           <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900">
-            <RotateCcw className="size-4 text-brand-600" aria-hidden /> Due for review today
+            <RotateCcw className="size-4 text-brand-600" aria-hidden /> {t("Due for review today")}
           </p>
           <p className="text-sm text-zinc-500">
-            Questions you got wrong come back after 1, 3 and 7 days until you get them right.
+            {t("Questions you got wrong come back after 1, 3 and 7 days until you get them right.")}
           </p>
           <div className="flex flex-wrap gap-2">
             {review.map((r) => (
@@ -162,22 +164,22 @@ export function DashboardPage() {
       <Card className="flex flex-col gap-3 p-4">
         <div className="flex items-center justify-between">
           <p className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900">
-            <Sparkles className="size-4 text-brand-600" aria-hidden /> Today's study plan
+            <Sparkles className="size-4 text-brand-600" aria-hidden /> {t("Today's study plan")}
           </p>
-          {week && <button onClick={() => navigate("/study-plan")} className="text-xs font-medium text-brand-600">View full week</button>}
+          {week && <button onClick={() => navigate("/study-plan")} className="text-xs font-medium text-brand-600">{t("View full week")}</button>}
         </div>
         {loading ? (
           <div className="flex justify-center py-4">
             <Spinner />
           </div>
         ) : !plan ? (
-          <p className="text-sm text-zinc-500">Set up your profile to get a personalized plan here.</p>
+          <p className="text-sm text-zinc-500">{t("Set up your profile to get a personalized plan here.")}</p>
         ) : (
           <div className="flex flex-col gap-2">
             {today?.rationale && <p className="text-xs text-zinc-500">{today.rationale}</p>}
             {week && !week.realistic && (
               <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
-                There isn't quite enough time to cover everything before your exam - this plan prioritizes what's tested most.
+                {t("There isn't quite enough time to cover everything before your exam - this plan prioritizes what's tested most.")}
               </p>
             )}
             {plan.map((t, i) => (
@@ -187,7 +189,7 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <p className="text-sm text-zinc-500">What would you like to study today?</p>
+      <p className="text-sm text-zinc-500">{t("What would you like to study today?")}</p>
       {tiles.map((tile) => (
         <CardButton key={tile.to} onClick={() => navigate(tile.to)} className="p-4">
           <div className="flex items-center gap-4">

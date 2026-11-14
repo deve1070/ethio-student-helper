@@ -5,11 +5,13 @@ import { Button } from "../../components/ui/Button"
 import { Field, PasswordInput, TextInput, ErrorBanner } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
 import { errorMessage } from "../../lib/api"
+import { LanguageSwitch, useI18n } from "../../lib/i18n"
 
 const GRADES = [9, 10, 11, 12]
 
 export function SignupPage() {
   const { signup } = useAuth()
+  const { t } = useI18n()
   const navigate = useNavigate()
   const [fullName, setFullName] = useState("")
   const [identifier, setIdentifier] = useState("")
@@ -44,22 +46,25 @@ export function SignupPage() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-[#f7f8f7] px-5 py-10">
       <div className="w-full max-w-sm">
+        <div className="mb-4 flex justify-end">
+          <LanguageSwitch />
+        </div>
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <div className="flex size-14 items-center justify-center rounded-2xl bg-brand-600">
             <GraduationCap className="size-7 text-white" aria-hidden />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900">Create your account</h1>
-            <p className="mt-1 text-sm text-zinc-500">It only takes a minute.</p>
+            <h1 className="text-xl font-semibold text-zinc-900">{t("Create your account")}</h1>
+            <p className="mt-1 text-sm text-zinc-500">{t("It only takes a minute.")}</p>
           </div>
         </div>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           {error && <ErrorBanner message={error} />}
-          <Field label="Full name" htmlFor="fullName">
+          <Field label={t("Full name")} htmlFor="fullName">
             <TextInput id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} />
           </Field>
-          <Field label="Phone or email" htmlFor="identifier">
+          <Field label={t("Phone or email")} htmlFor="identifier">
             <TextInput
               id="identifier"
               autoComplete="username"
@@ -68,7 +73,7 @@ export function SignupPage() {
               required
             />
           </Field>
-          <Field label="Password" htmlFor="password">
+          <Field label={t("Password")} htmlFor="password">
             <PasswordInput
               id="password"
               autoComplete="new-password"
@@ -78,7 +83,7 @@ export function SignupPage() {
               required
             />
           </Field>
-          <Field label="Grade" htmlFor="grade">
+          <Field label={t("Grade")} htmlFor="grade">
             <div className="grid grid-cols-4 gap-2">
               {GRADES.map((g) => (
                 <button
@@ -92,12 +97,12 @@ export function SignupPage() {
                       : "border-zinc-300 text-zinc-600 hover:bg-zinc-50")
                   }
                 >
-                  Grade {g}
+                  {t("Grade {n}", { n: g })}
                 </button>
               ))}
             </div>
           </Field>
-          <Field label="Referral code (optional)" htmlFor="referralCode">
+          <Field label={t("Referral code (optional)")} htmlFor="referralCode">
             <TextInput
               id="referralCode"
               value={referralCode}
@@ -106,14 +111,14 @@ export function SignupPage() {
             />
           </Field>
           <Button type="submit" size="lg" fullWidth loading={loading}>
-            Create account
+            {t("Create account")}
           </Button>
         </form>
 
         <p className="mt-6 text-center text-sm text-zinc-500">
-          Already have an account?{" "}
+          {t("Already have an account?")}{" "}
           <Link to="/login" className="font-medium text-brand-700 hover:underline">
-            Log in
+            {t("Log in")}
           </Link>
         </p>
       </div>
