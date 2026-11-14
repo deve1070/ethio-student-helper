@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from llm.client import LLMClient
 from notes.store import available_subjects, available_units, get_or_create_note, record_note_view
+from payments.entitlement import check_entitlement, record_free_action
 from pydantic import BaseModel
 from retriever.builder import RetrieverBuilder
 from retriever import vectorstore
@@ -37,7 +38,12 @@ def _fresh_textbook_store():
 
 @router.get("/subjects")
 def subjects(grade: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    return {"grade": grade, "subjects": available_subjects(db, grade)}
+    # Same shared stream rule ESSLCE and Practice use (config.constants.subject_visible) - a
+    # natural-science student never sees a social-only subject's notes and vice versa.
+    return {
+        "grade": grade,
+        "subjects": [s for s in available_subjects(db, grade) if constants.subject_visible(s, user.stream)],
+    }
 
 
 @router.get("/units")
@@ -65,7 +71,7 @@ class NoteResponse(BaseModel):
     is_calculation: bool
 
 
-def _note_events(grade: int, subject: str, unit: str, db: Session, user: User):
+def _note_events(grade: int, subject: str, unit: str, db: Session, user: User, needs_charge: bool):
     """Generator of SSE-formatted strings for the /note stream below. get_or_create_note
     reports its progress through a plain callback (notes/store.py keeps that convention
     rather than becoming a generator itself, since test/test_notes.py and any other
@@ -104,6 +110,8 @@ def _note_events(grade: int, subject: str, unit: str, db: Session, user: User):
         return
 
     record_note_view(db, user.id, grade, subject, unit)
+    if needs_charge:
+        record_free_action(db, user, "notes", f"{grade}:{subject}:{unit}")
     yield format_sse_event({
         "done": True,
         **NoteResponse(
@@ -128,4 +136,11 @@ def note(
     # this needs more than a single-question elaboration's budget - but this account's Groq tier hard-caps
     # a whole request (input + this reservation) at 8000 tokens, so it can't just be pushed arbitrarily
     # higher; notes.store.MAX_CONTEXT_CHARS caps the input side to leave this room safely under that.
-    return StreamingResponse(_note_events(grade, subject, unit, db, user), media_type="text/event-stream")
+    #
+    # Dedup key is (grade, subject, unit), not generation success - a student re-opening a note
+    # they've already viewed stays free even on a cache miss elsewhere, and the check happens
+    # before the StreamingResponse is built so a blocked request is a real HTTP 402, not an SSE event.
+    needs_charge = check_entitlement(db, user, "notes", f"{grade}:{subject}:{unit}")
+    return StreamingResponse(
+        _note_events(grade, subject, unit, db, user, needs_charge), media_type="text/event-stream"
+    )

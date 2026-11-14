@@ -15,6 +15,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -293,6 +294,37 @@ class Subscription(Base):
         String, CheckConstraint("status IN ('active','expired','cancelled')")
     )
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class FreeActionUsage(Base):
+    """One row per free AI action a non-subscribed student has used, across every gated feature -
+    see payments/entitlement.py's check_entitlement/record_free_action, the single shared pool
+    this backs. `resource_key` is non-null only for features that dedup repeat access to the same
+    resource (notes: f"{grade}:{subject}:{unit}", elaborate: str(question_id)); features where
+    every call is a genuinely new one (explain, ask, exam_solve) always pass None - Postgres never
+    treats two NULLs as equal in a unique constraint, so those rows never collide/dedup, which is
+    exactly the desired "always counts" behavior with no special-casing in application code."""
+
+    __tablename__ = "free_action_usage"
+    __table_args__ = (
+        CheckConstraint(
+            "feature IN ('notes','elaborate','ask','explain','exam_solve')",
+            name="ck_free_action_usage_feature",
+        ),
+        UniqueConstraint("user_id", "feature", "resource_key", name="uq_free_action_usage"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    feature: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_key: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

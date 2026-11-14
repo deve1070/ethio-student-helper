@@ -1,26 +1,31 @@
-"""
-Single guard every paid feature calls before doing expensive work.
-Balance is derived by summing credit_ledger, never stored as a running
-counter, so entitlement is always computed from the ledger itself —
-never trust a client's locally cached credit count.
+"""Single pair of guards every AI-gated feature calls: check_entitlement before the expensive
+work, record_free_action only after it actually succeeds - mirrors the check-then-charge shape
+api/routes_exam.py's old require_credits/_charge_credits pair already used, so a generation that
+fails midway (a 422/503) never burns part of a student's free quota.
+
+A student's free allowance is a single shared pool (FREE_ACTION_QUOTA) spent across every gated
+feature - not a per-feature allowance - by design: the product goal is to let a student feel real
+value across several different features before hitting the paywall, not lock any one feature on
+first use. An active subscription bypasses the pool entirely, forever (has_active_subscription).
 """
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from db.models import CreditLedgerEntry, Subscription
+from db.models import FreeActionUsage, Subscription, User
+
+FREE_ACTION_QUOTA = 8
 
 
-def get_credit_balance(db: Session, user_id: UUID) -> int:
-    total = db.scalar(
-        select(func.coalesce(func.sum(CreditLedgerEntry.delta), 0)).where(
-            CreditLedgerEntry.user_id == user_id
-        )
-    )
-    return int(total or 0)
+def _as_utc(dt: datetime) -> datetime:
+    """Postgres round-trips a DateTime(timezone=True) column as aware; SQLite (used by this
+    project's tests) returns it naive regardless - treat a naive value as already UTC rather
+    than letting the aware/naive comparison below raise."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def has_active_subscription(db: Session, user_id: UUID) -> bool:
@@ -32,31 +37,53 @@ def has_active_subscription(db: Session, user_id: UUID) -> bool:
     )
     if sub is None:
         return False
-    if sub.current_period_end and sub.current_period_end < datetime.now(timezone.utc):
+    if sub.current_period_end and _as_utc(sub.current_period_end) < datetime.now(timezone.utc):
         return False
     return True
 
 
-def require_credits(db: Session, user_id: UUID, cost: int) -> None:
-    """Raise 402 Payment Required if the user can't cover `cost`.
+def check_entitlement(db: Session, user: User, feature: str, resource_key: str | None) -> bool:
+    """Raises HTTPException(402) if blocked. Returns True if the caller must call
+    record_free_action(...) after the gated work succeeds - i.e. this call will consume a new
+    free action; returns False if no recording is needed, either because the user has an active
+    subscription or because this exact resource was already unlocked by this user before."""
+    if has_active_subscription(db, user.id):
+        return False
 
-    An active subscription bypasses the credit check entirely; otherwise
-    the ledger balance must cover the cost. Call this right before the
-    expensive step (an LLM call), not at the top of the request — a
-    request that turns out to be a cache hit should never be blocked by
-    an empty credit balance.
-    """
-    if cost <= 0:
-        return
-    if has_active_subscription(db, user_id):
-        return
-    balance = get_credit_balance(db, user_id)
-    if balance < cost:
+    if resource_key is not None:
+        already_unlocked = db.scalar(
+            select(FreeActionUsage.id).where(
+                FreeActionUsage.user_id == user.id,
+                FreeActionUsage.feature == feature,
+                FreeActionUsage.resource_key == resource_key,
+            )
+        )
+        if already_unlocked is not None:
+            return False
+
+    used = db.scalar(
+        select(func.count(FreeActionUsage.id)).where(FreeActionUsage.user_id == user.id)
+    )
+    if (used or 0) >= FREE_ACTION_QUOTA:
         raise HTTPException(
             status_code=402,
             detail={
-                "message": "Not enough credits for this action.",
-                "balance": balance,
-                "required": cost,
+                "message": f"You've used all {FREE_ACTION_QUOTA} free previews. "
+                "Subscribe for unlimited access all year.",
+                "used": used,
+                "quota": FREE_ACTION_QUOTA,
             },
         )
+    return True
+
+
+def record_free_action(db: Session, user: User, feature: str, resource_key: str | None) -> None:
+    """Call only after the gated work actually succeeded, and only when check_entitlement
+    returned True. A concurrent duplicate insert for the same (user, feature, resource_key) is
+    caught by the table's unique constraint and swallowed, not raised - the response the caller
+    already produced stands either way."""
+    db.add(FreeActionUsage(user_id=user.id, feature=feature, resource_key=resource_key))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()

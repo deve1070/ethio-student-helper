@@ -12,7 +12,13 @@ from auth.dependencies import get_current_user
 from auth.referral import generate_referral_code
 from auth.security import create_access_token, hash_password, verify_password
 from auth.telegram_notify import send_text
-from config.constants import COMMON_SUBJECTS, NATURAL_ONLY_SUBJECTS, SOCIAL_ONLY_SUBJECTS
+from payments.referral import REFERRAL_REWARD_ETB
+from config.constants import (
+    COMMON_SUBJECTS,
+    NATURAL_ONLY_SUBJECTS,
+    SOCIAL_ONLY_SUBJECTS,
+    subject_visible,
+)
 from config.settings import settings
 from db.models import PasswordResetCode, TelegramLink, User
 from db.session import get_db
@@ -232,15 +238,19 @@ def confirm_password_reset(
 
 class PublicConfigResponse(BaseModel):
     telegram_group_url: str | None
+    telegram_bot_url: str | None
 
 
 @router.get("/public-config", response_model=PublicConfigResponse)
 def public_config() -> PublicConfigResponse:
-    """Unauthenticated - the forgot-password page needs the Telegram group link before a student has
-    any session at all; ProfileResponse.telegram_group_url (above) serves the same value to the
-    logged-in Profile page, so there's exactly one setting (settings.TELEGRAM_GROUP_URL), just two
-    ways of reading it depending on whether a session exists yet."""
-    return PublicConfigResponse(telegram_group_url=settings.TELEGRAM_GROUP_URL or None)
+    """Unauthenticated - the forgot-password page needs these links before a student has any session
+    at all; ProfileResponse (below) serves the same two settings to the logged-in Profile page, so
+    there's exactly one definition of each (settings.TELEGRAM_GROUP_URL/TELEGRAM_BOT_URL), just two
+    ways of reading them depending on whether a session exists yet."""
+    return PublicConfigResponse(
+        telegram_group_url=settings.TELEGRAM_GROUP_URL or None,
+        telegram_bot_url=settings.TELEGRAM_BOT_URL or None,
+    )
 
 
 @router.get("/streams")
@@ -268,10 +278,13 @@ class ProfileResponse(BaseModel):
     onboarding_completed: bool
     referral_code: str
     referral_paid_count: int
+    referral_earnings_etb: float
     telegram_group_url: str | None
+    telegram_bot_url: str | None
+    telegram_linked: bool
 
 
-def _profile_response(user: User) -> ProfileResponse:
+def _profile_response(db: Session, user: User) -> ProfileResponse:
     return ProfileResponse(
         user_id=user.id,
         full_name=user.full_name,
@@ -285,13 +298,16 @@ def _profile_response(user: User) -> ProfileResponse:
         onboarding_completed=user.onboarding_completed_at is not None,
         referral_code=user.referral_code,
         referral_paid_count=user.referral_paid_count,
+        referral_earnings_etb=user.referral_paid_count * REFERRAL_REWARD_ETB,
         telegram_group_url=settings.TELEGRAM_GROUP_URL or None,
+        telegram_bot_url=settings.TELEGRAM_BOT_URL or None,
+        telegram_linked=db.query(TelegramLink).filter(TelegramLink.user_id == user.id).first() is not None,
     )
 
 
 @router.get("/me", response_model=ProfileResponse)
-def me(user: User = Depends(get_current_user)) -> ProfileResponse:
-    return _profile_response(user)
+def me(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> ProfileResponse:
+    return _profile_response(db, user)
 
 
 class UpdateProfileRequest(BaseModel):
@@ -315,12 +331,7 @@ def update_me(
     if body.stream is not None:
         user.stream = body.stream
     if body.subjects_selected is not None:
-        allowed = COMMON_SUBJECTS | (
-            NATURAL_ONLY_SUBJECTS if user.stream == "natural_science"
-            else SOCIAL_ONLY_SUBJECTS if user.stream == "social_science"
-            else NATURAL_ONLY_SUBJECTS | SOCIAL_ONLY_SUBJECTS  # no stream yet (grade 9/10): anything goes
-        )
-        bad = [s for s in body.subjects_selected if s not in allowed]
+        bad = [s for s in body.subjects_selected if not subject_visible(s, user.stream)]
         if bad:
             raise HTTPException(
                 status_code=400,
@@ -335,4 +346,4 @@ def update_me(
         user.onboarding_completed_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
-    return _profile_response(user)
+    return _profile_response(db, user)

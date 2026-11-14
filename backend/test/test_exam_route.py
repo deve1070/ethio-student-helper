@@ -1,7 +1,9 @@
 """Test of POST /v1/exam/solve: the real route with fakes for the model, OCR and similarity cache,
-and a real (SQLite) database. Run from backend/:   python test/test_exam_route.py
+a real (SQLite) database, and the REAL payments.entitlement module (not stubbed) so the free-action
+quota/dedup logic itself gets exercised here too. Run from backend/:   python test/test_exam_route.py
 Checks the money-and-correctness rules: no caching or charging of 'no match' / unverified answers,
-503 when the AI service is down, canonical subject names, credits only for fresh verified answers."""
+503 when the AI service is down, canonical subject names, a free action only for fresh verified
+answers, and that the shared 8-action quota (not a per-feature one) blocks a fresh solve once used up."""
 
 import os
 import sys
@@ -19,7 +21,7 @@ def stub(name, **attrs):
     return m
 
 
-state = {"balance": 5, "pipeline_calls": 0, "next": None}
+state = {"pipeline_calls": 0, "next": None}
 
 
 class Unavailable(RuntimeError):
@@ -42,8 +44,8 @@ stub("agents.workflow", AgentWorkflow=FakeWorkflow)
 stub("auth")
 stub("auth.dependencies", get_current_user=lambda: None)
 stub("db.session", get_db=lambda: None)
-stub("exam")
-stub("exam.ocr", extract_text_from_base64_image=lambda b: "text from image")
+stub("exams")
+stub("exams.ocr", extract_text_from_base64_image=lambda b: "text from image")
 
 
 class FakeCache:
@@ -71,18 +73,7 @@ class FakeCache:
         return q, a
 
 
-stub("exam.cache", ExamCache=FakeCache)
-
-from fastapi import HTTPException
-
-
-def require_credits(db, user_id, cost):
-    if state["balance"] < cost:
-        raise HTTPException(status_code=402, detail="Out of credits")
-
-
-stub("payments")
-stub("payments.entitlement", require_credits=require_credits)
+stub("exams.cache", ExamCache=FakeCache)
 
 
 class FakeBuilder:
@@ -114,6 +105,9 @@ engine = create_engine(
 M.Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine, autoflush=False)
 
+# payments.entitlement is NOT stubbed - the real check_entitlement/record_free_action run against
+# the same SQLite database, so this test also covers the entitlement boundary itself for the one
+# gated endpoint that was already metered before this feature existed.
 import api.routes_exam as R
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -123,14 +117,17 @@ user = M.User(id=uuid.uuid4(), full_name="Alice")
 db.add_all(
     [
         user,
+        # ExamSolveRequest.grade is pinned to exactly 12 (ESSLCE scope) - a pre-existing,
+        # already-uncommitted change on this branch, unrelated to this feature; these fixtures
+        # just need to match it for the route to accept any request at all.
         M.Textbook(
-            id=uuid.uuid4(), grade=9, subject="chemistry", title="Chemistry Grade 9"
+            id=uuid.uuid4(), grade=12, subject="chemistry", title="Chemistry Grade 12"
         ),
         M.Textbook(
             id=uuid.uuid4(),
-            grade=9,
+            grade=12,
             subject="information_technology",
-            title="IT Grade 9",
+            title="IT Grade 12",
         ),
     ]
 )
@@ -152,15 +149,15 @@ app.dependency_overrides[R.get_current_user] = lambda: user
 c = TestClient(app)
 
 
-def solve(subject="chemistry", q="What is an ion?", grade=9):
+def solve(subject="chemistry", q="What is an ion?", grade=12):
     return c.post(
         "/v1/exam/solve", json={"grade": grade, "subject": subject, "question_text": q}
     )
 
 
-def ledger():
+def free_actions_used():
     s = Session()
-    n = s.query(M.CreditLedgerEntry).count()
+    n = s.query(M.FreeActionUsage).filter_by(user_id=user.id).count()
     s.close()
     return n
 
@@ -183,26 +180,23 @@ GOOD = {
 # 1) unknown / mistyped subject -> 400 with a suggestion; nothing recorded or charged
 r = solve("chemisty")
 assert r.status_code == 400 and "Did you mean 'chemistry'" in r.json()["detail"], r.text
-assert state["pipeline_calls"] == 0 and ledger() == 0 and submissions() == 0
-# 2) a fresh verified answer: generated, cached, one credit charged
+assert state["pipeline_calls"] == 0 and free_actions_used() == 0 and submissions() == 0
+# 2) a fresh verified answer: generated, cached, one free action consumed
 state["next"] = GOOD
 r = solve()
 b = r.json()
 assert (
     r.status_code == 200
     and b["source"] == "generated"
-    and b["credits_charged"] == 1
+    and "credits_charged" not in b
     and b["exam_question_id"]
 ), b
-assert ledger() == 1 and state["pipeline_calls"] == 1
+assert free_actions_used() == 1 and state["pipeline_calls"] == 1
 # 3) the same question again, written with a different subject spelling: served from the cache, free, no model call
 r = solve("  Chemistry ")
 b = r.json()
 assert (
-    b["source"] == "cache"
-    and b["credits_charged"] == 0
-    and state["pipeline_calls"] == 1
-    and ledger() == 1
+    b["source"] == "cache" and state["pipeline_calls"] == 1 and free_actions_used() == 1
 ), b
 # 4) the textbooks have nothing on it: not cached, not charged, no id; the submission is still recorded
 state["next"] = {
@@ -219,8 +213,7 @@ assert (
     r.status_code == 200
     and b["source"] == "no_match"
     and b["exam_question_id"] is None
-    and b["credits_charged"] == 0
-    and ledger() == 1
+    and free_actions_used() == 1
 ), b
 assert submissions() == before + 1
 solve(q="Who won the world cup?")
@@ -236,10 +229,7 @@ state["next"] = dict(
 r = solve(q="Define ion?")
 b = r.json()
 assert (
-    b["source"] == "unverified"
-    and b["exam_question_id"] is None
-    and b["credits_charged"] == 0
-    and ledger() == 1
+    b["source"] == "unverified" and b["exam_question_id"] is None and free_actions_used() == 1
 ), b
 calls = state["pipeline_calls"]
 solve(q="Define ion?")
@@ -254,10 +244,7 @@ state["next"] = dict(
 r = solve(q="Define cation?")
 b = r.json()
 assert (
-    b["source"] == "unverified"
-    and b["exam_question_id"] is None
-    and b["credits_charged"] == 0
-    and ledger() == 1
+    b["source"] == "unverified" and b["exam_question_id"] is None and free_actions_used() == 1
 ), b
 calls = state["pipeline_calls"]
 solve(q="Define cation?")
@@ -265,16 +252,26 @@ assert state["pipeline_calls"] == calls + 1  # not cached either
 # 6) AI service down -> 503, nothing charged or cached
 state["next"] = LLMUnavailableError("rate limit")
 r = solve(q="Another question about atoms?")
-assert r.status_code == 503 and "try again" in r.json()["detail"] and ledger() == 1
-# 7) out of credits: fresh questions are refused (402) but cached ones are still free
-state["balance"] = 0
+assert r.status_code == 503 and "try again" in r.json()["detail"] and free_actions_used() == 1
+# 7) quota exhaustion is a SHARED pool, not per-feature - drive it up with other features' usage
+# (resource_key=None rows, matching how explain/ask always count) rather than more exam solves,
+# then confirm a fresh solve 402s while a cached one stays free regardless.
+s = Session()
+s.add_all(
+    [M.FreeActionUsage(user_id=user.id, feature="explain", resource_key=None) for _ in range(6)]
+)
+s.commit()
+s.close()
+assert free_actions_used() == 7  # 1 from exam_solve above + 6 just inserted
 state["next"] = GOOD
-assert solve(q="A brand new question?").status_code == 402
-assert solve().json()["source"] == "cache"
-# 8) the IT subject works with spaces and capitals, and a grade with no books lists nothing
+assert solve(q="A brand new question?").status_code == 200  # 8th action: still allowed
+assert free_actions_used() == 8
+state["next"] = GOOD
+r = solve(q="Yet another brand new question?")
+assert r.status_code == 402, r.text  # 9th action: blocked
+assert solve().json()["source"] == "cache"  # cached answers are never gated, even now
+# 8) the IT subject works with spaces and capitals
 assert solve("Information Technology", q="What is a file?").status_code != 400
-r = solve("chemistry", grade=11)
-assert r.status_code == 400 and "none yet" in r.json()["detail"]
 print(
-    "EXAM ROUTE TESTS PASSED (400 typo, cache, no_match, unverified, 503, 402, spelling-insensitive cache)"
+    "EXAM ROUTE TESTS PASSED (400 typo, cache, no_match, unverified, 503, shared-quota 402, spelling-insensitive cache)"
 )

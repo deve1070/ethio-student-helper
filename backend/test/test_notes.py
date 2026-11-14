@@ -73,7 +73,7 @@ class FakeLLM:
 
 stub("config")
 stub("config.constants", TEXTBOOK_COLLECTION_NAME="textbooks", CALCULATION_SUBJECTS={"mathematics"},
-     LANGUAGE_SKILL_SUBJECTS={"english"})
+     LANGUAGE_SKILL_SUBJECTS={"english"}, subject_visible=lambda subject, stream: True)
 stub("config.settings", settings=types.SimpleNamespace(VECTOR_DATABASE_URL="x"))
 sys.modules["config"].constants = sys.modules["config.constants"]
 sys.modules["config"].settings = sys.modules["config.settings"]
@@ -132,7 +132,7 @@ def _db():
 app = FastAPI()
 app.include_router(R.router)
 app.dependency_overrides[R.get_db] = _db
-fake_user = types.SimpleNamespace(id=uuid.uuid4())  # routes_notes.py now records a per-user note view
+fake_user = types.SimpleNamespace(id=uuid.uuid4(), stream=None)  # routes_notes.py reads both of these
 app.dependency_overrides[R.get_current_user] = lambda: fake_user
 c = TestClient(app)
 
@@ -213,6 +213,15 @@ llm_state["unit"] = {"overview": "DIFFERENT - should never be seen, this call mu
 r2 = c.get("/v1/notes/note", params={"grade": 10, "subject": "mathematics", "unit": "Unit 2: Limits and Continuity"})
 assert note_result(r2)["overview"] == b["overview"], r2.text  # unchanged - cached, not regenerated
 
+# ---- 4b. free-action accounting: the first (grade,subject,unit) view charged exactly one free
+# action; the cached repeat view just above must NOT have charged a second one (payments.entitlement
+# is NOT stubbed in this file - the real check_entitlement/record_free_action ran against the same
+# real SQLite db as everything else here) --------------------------------------------------------
+db2.expire_all()
+notes_usage = db2.query(M.FreeActionUsage).filter_by(user_id=fake_user.id, feature="notes").all()
+assert len(notes_usage) == 1, notes_usage
+assert notes_usage[0].resource_key == "10:mathematics:Unit 2: Limits and Continuity", notes_usage[0].resource_key
+
 # ---- 5. a provider failure (rate limit, request-too-large, network) degrades to a clean error event, never a 500 ---
 llm_state["raise_error"] = True
 r = c.get("/v1/notes/note", params={"grade": 10, "subject": "mathematics", "unit": "Unit 9: Provider Error"})
@@ -220,6 +229,23 @@ assert r.status_code == 200, r.text  # not 500 - api/routes_notes.py's normal "c
 assert "error" in note_result(r), r.text
 llm_state["raise_error"] = False
 assert db.query(NM.StudyNote).filter(NM.StudyNote.unit == "Unit 9: Provider Error").count() == 0  # nothing cached
+db2.expire_all()
+assert db2.query(M.FreeActionUsage).filter_by(user_id=fake_user.id).count() == 1  # the provider failure charged nothing
+
+# ---- 5b. quota exhaustion: drive the shared pool up with another feature's usage, then confirm
+# the already-unlocked unit stays free at quota while a genuinely new one 402s before any
+# generation is even attempted --------------------------------------------------------------------
+for _ in range(7):
+    db2.add(M.FreeActionUsage(user_id=fake_user.id, feature="ask", resource_key=None))
+db2.commit()
+assert db2.query(M.FreeActionUsage).filter_by(user_id=fake_user.id).count() == 8  # 1 notes + 7 just added
+
+r = c.get("/v1/notes/note", params={"grade": 10, "subject": "mathematics", "unit": "Unit 2: Limits and Continuity"})
+assert r.status_code == 200, r.text  # already-unlocked unit stays free even once the pool is full
+assert note_result(r)["overview"] == b["overview"], r.text
+
+r = c.get("/v1/notes/note", params={"grade": 10, "subject": "mathematics", "unit": "Unit 10: Later Topic"})
+assert r.status_code == 402, r.text  # a genuinely new (grade,subject,unit) is blocked once the pool is full
 
 # ---- 6. English units get a different prompt: the unit's theme ("Sustainable Development", ...) is only a
 # vehicle for a passage/vocabulary list, never the subject of the notes - the prompt must say so; no other

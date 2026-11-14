@@ -71,7 +71,10 @@ brief "for example, ...") would make an abstract statement click for a Grade {gr
 skip it where the concept is already concrete or an example wouldn't add anything. You decide per subtopic \
 - never force an example in, never a fixed count.
 - "source_index": the index of the ONE excerpt below that most directly supports that summary
-- "supporting_quote": one verbatim quote from that excerpt backing the summary
+- "supporting_quote": ONE unbroken, contiguous span of text copied exactly as printed in that excerpt, \
+backing the summary - never several sentences stitched together, and never "..." standing in for words \
+you skipped in between. If no single short, contiguous span says enough on its own, quote a shorter one \
+that still genuinely anchors the summary, rather than splicing separate parts of the excerpt into one.
 
 Also write "overview": a 1-2 sentence overview of the whole unit, written after you've worked out the \
 subtopics below it.
@@ -122,9 +125,11 @@ For EACH entry (either level), give:
 - "heading": a short, clear title naming the language point (a few words, no number)
 - "level": 1 or 2 (a level-2 entry is a sub-topic of the level-1 entry immediately before it)
 - "source_index": the index of the ONE excerpt below that most directly supports this point
-- "supporting_quote": one verbatim quote from that excerpt, anchoring that this point is really taught \
-here (it does not have to contain the definition/example itself - the excerpt usually only poses the \
-exercise, not the rule)
+- "supporting_quote": ONE unbroken, contiguous span of text copied exactly as printed in that excerpt, \
+anchoring that this point is really taught here (it does not have to contain the definition/example \
+itself - the excerpt usually only poses the exercise, not the rule). Never several sentences stitched \
+together, and never "..." standing in for words you skipped in between - quote a shorter contiguous \
+span instead if the whole passage is too long to use as-is.
 - "summary": the point, actually TAUGHT - however long that genuinely takes, there is no sentence limit \
 and no fixed template here, and anything that skips what's below has not done the job:
   - State the rule/meaning itself (a grammar point's form/structure and when/why it's used; a vocabulary \
@@ -201,9 +206,12 @@ needs (often 1, sometimes 2 if the formula has genuinely different cases worth s
 subtopic with no formula to work through, like a bare definition) - never pad with a trivial example just \
 to have one, never skip an example a formula genuinely needs.
 - "source_index": the index of the ONE excerpt below that most directly supports this subtopic
-- "supporting_quote": one verbatim quote from that excerpt, anchoring that this subtopic is really covered \
-here (it does not have to contain the formula or worked example itself - the excerpt may only state the \
-topic, with the formula/examples supplied from your own subject knowledge, pitched at this grade level)
+- "supporting_quote": ONE unbroken, contiguous span of text copied exactly as printed in that excerpt, \
+anchoring that this subtopic is really covered here (it does not have to contain the formula or worked \
+example itself - the excerpt may only state the topic, with the formula/examples supplied from your own \
+subject knowledge, pitched at this grade level). Never several sentences stitched together, and never \
+"..." standing in for words you skipped in between - quote a shorter contiguous span instead if the \
+whole passage is too long to use as-is.
 
 Also write "overview": a 1-2 sentence overview of the whole unit, written after you've worked out the \
 subtopics below it.

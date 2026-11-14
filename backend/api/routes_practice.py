@@ -4,6 +4,7 @@ import uuid
 from typing import Literal
 
 from auth.dependencies import get_current_user
+from config.constants import subject_visible
 from db.models import Textbook, User
 from db.models_practice import QuizAttempt, QuizQuestion, QuizReport
 from db.session import get_db
@@ -19,10 +20,8 @@ from utils.units import unit_sort_key
 router = APIRouter(prefix="/v1/practice", tags=["practice"])
 
 CANDIDATE_POOL = 2000  # questions considered per request
-# Credits: practice is served from the bank (no model call), so it is free for now.
-# To meter it later:  from payments.entitlement import require_credits
-#                     require_credits(db, user.id, COST)   # in /next
-CREDIT_COST_PER_REQUEST = 0
+# Practice is served from the question bank (no model call), so it stays free, unmetered, for
+# everyone - never part of the free-action quota or subscription gate (payments/entitlement.py).
 
 
 # ---- request / response models ------------------------------------------
@@ -117,7 +116,10 @@ class ReportRequest(BaseModel):
 def subjects(
     grade: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> dict:
-    """Subjects that have approved practice questions for this grade."""
+    """Subjects that have approved practice questions for this grade, restricted to whatever this
+    student's stream may see (config.constants.subject_visible - same shared rule ESSLCE and Study
+    Notes use). A grade 9-10 subject outside the ESSLCE stream partition entirely (e.g.
+    "information_technology") is never affected by this."""
     rows = (
         db.query(QuizQuestion.subject, func.count(QuizQuestion.id))
         .filter(QuizQuestion.grade == grade, QuizQuestion.status == "active")
@@ -127,7 +129,7 @@ def subjects(
     )
     return {
         "grade": grade,
-        "subjects": [{"subject": s, "questions": int(n)} for s, n in rows],
+        "subjects": [{"subject": s, "questions": int(n)} for s, n in rows if subject_visible(s, user.stream)],
     }
 
 

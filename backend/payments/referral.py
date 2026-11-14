@@ -8,6 +8,12 @@ from sqlalchemy.orm import Session
 from auth.telegram_notify import send_text
 from db.models import Payment, User
 
+# The one canonical place this business constant lives - api/routes_auth.py's ProfileResponse
+# computes each student's displayed earned total from this, so the "50" never gets duplicated
+# into the frontend. Paid out manually (Telebirr etc.), same as payment approval - this constant
+# only controls what's DISPLAYED as owed, not an automated payout.
+REFERRAL_REWARD_ETB = 50.0
+
 
 def credit_referral_if_first_payment(db: Session, payment: Payment) -> None:
     """Increments the referrer's referral_paid_count by exactly one, the moment the user they referred

@@ -24,7 +24,7 @@ def notify_admins_pending_payment(
     payment_id: uuid.UUID,
     receipt_photo_bytes: bytes,
     student_name: str,
-    bundle: str,
+    plan: str,
     amount_etb: float,
     submitted_transaction_id: str,
     note: str,
@@ -50,7 +50,7 @@ def notify_admins_pending_payment(
     caption = (
         "Payment needs review\n"
         f"Student: {student_name}\n"
-        f"Bundle: {bundle} ({amount_etb} ETB)\n"
+        f"Plan: {plan} ({amount_etb} ETB)\n"
         f"Submitted transaction id: {submitted_transaction_id}\n"
         f"Why it wasn't auto-approved: {note}"
     )

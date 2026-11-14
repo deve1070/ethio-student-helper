@@ -29,6 +29,25 @@ NATURAL_ONLY_SUBJECTS: set[str] = {"biology", "chemistry", "physics"}
 SOCIAL_ONLY_SUBJECTS: set[str] = {"economics", "geography", "history"}
 COMMON_SUBJECTS: set[str] = {"english", "scholastic_aptitude_test", "mathematics"}
 
+
+# Every subject stream filtering has ANY opinion about - Practice also covers grade 9-10 subjects
+# with no ESSLCE/stream equivalent at all (e.g. "information_technology", "agriculture",
+# "citizenship_education" - see utils/subjects.py's alias table), and those must stay visible to
+# everyone regardless of stream; this set is exactly the subjects that get partitioned, nothing more.
+STREAM_PARTITIONED_SUBJECTS: set[str] = NATURAL_ONLY_SUBJECTS | SOCIAL_ONLY_SUBJECTS | COMMON_SUBJECTS
+
+
+def subject_visible(subject: str, stream: str | None) -> bool:
+    """Whether a student in this stream may see this subject - in ESSLCE, Practice, Study Notes, and
+    Progress (all four read this same function, confirmed directly by the user: a natural-science
+    student must never see a social-only subject and vice versa). A subject outside
+    STREAM_PARTITIONED_SUBJECTS entirely is always visible - stream filtering has no opinion about it.
+    No stream yet (grades 9-10) also means no filtering at all."""
+    if stream not in ("natural_science", "social_science") or subject not in STREAM_PARTITIONED_SUBJECTS:
+        return True
+    return subject in (NATURAL_ONLY_SUBJECTS if stream == "natural_science" else SOCIAL_ONLY_SUBJECTS) | COMMON_SUBJECTS
+
+
 # Mathematics and Physics content is almost always DERIVED (computed), not stated as a textbook fact -
 # quote-verification has nothing to check a computed answer against. Chemistry is mixed ("to some extent"
 # calculation, confirmed directly by the user), so it's included too. The Scholastic Aptitude Test's own

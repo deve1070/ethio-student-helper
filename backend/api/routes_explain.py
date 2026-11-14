@@ -1,14 +1,17 @@
 from agents.workflow import AgentWorkflow
+from auth.dependencies import get_current_user
 from config import constants
-from db.models import Textbook
-from db.session import SessionLocal
-from fastapi import APIRouter, HTTPException
+from db.models import Textbook, User
+from db.session import SessionLocal, get_db
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from llm.client import LLMClient
 from llm.retry import LLMUnavailableError
+from payments.entitlement import check_entitlement, record_free_action
 from pydantic import BaseModel, Field
 from retriever.builder import RetrieverBuilder
 from retriever.decompose import DecomposingRetriever
+from sqlalchemy.orm import Session
 from utils.sse import format_sse_event
 from utils.subjects import resolve_subject
 
@@ -44,10 +47,10 @@ class Citation(BaseModel):
     page: str | None = None
 
 
-def _explain_events(question: str, retriever):
+def _explain_events(question: str, retriever, db: Session, user: User, needs_charge: bool):
     """Generator of SSE-formatted strings for the /explain stream below. Validation
-    (grade/subject) already happened in explain() before this starts, since those are
-    plain HTTP 400s - once streaming starts, the response is already HTTP 200, so any
+    (grade/subject, entitlement) already happened in explain() before this starts, since those
+    are plain HTTP 400s/402s - once streaming starts, the response is already HTTP 200, so any
     error from here on (LLM unavailable, no answer) has to travel as a final
     {"done": true, "error": ...} event instead of an HTTP error status."""
     try:
@@ -59,11 +62,12 @@ def _explain_events(question: str, retriever):
             if not result.get("draft_answer"):
                 yield format_sse_event({"done": True, "error": "Could not generate an answer for this question."})
                 return
+            if needs_charge:
+                record_free_action(db, user, "explain", None)
             yield format_sse_event({
                 "done": True,
                 "answer": result["draft_answer"],
                 "citations": [Citation(**c).model_dump() for c in result.get("citations", [])],
-                "credits_charged": 0,
             })
     except LLMUnavailableError:
         yield format_sse_event({
@@ -73,7 +77,11 @@ def _explain_events(question: str, retriever):
 
 
 @router.post("/explain")
-def explain(request: ExplainRequest) -> StreamingResponse:
+def explain(
+    request: ExplainRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
     if request.grade not in constants.SUPPORTED_GRADES:
         raise HTTPException(
             status_code=400, detail=f"Unsupported grade: {request.grade}"
@@ -91,6 +99,11 @@ def explain(request: ExplainRequest) -> StreamingResponse:
             ),
         )
 
+    # Explain is free-form per topic, with nothing stable to dedup against - every call
+    # consumes a free action when unsubscribed. Checked before the StreamingResponse is built
+    # so a blocked request produces a real HTTP 402, not an SSE event.
+    needs_charge = check_entitlement(db, user, "explain", None)
+
     retriever = _retriever_builder.build_textbook_retriever(
         grade=request.grade, subject=subject
     )
@@ -98,5 +111,6 @@ def explain(request: ExplainRequest) -> StreamingResponse:
         retriever, _planner_llm
     )  # broad questions -> several searches
     return StreamingResponse(
-        _explain_events(request.question, retriever), media_type="text/event-stream"
+        _explain_events(request.question, retriever, db, user, needs_charge),
+        media_type="text/event-stream",
     )

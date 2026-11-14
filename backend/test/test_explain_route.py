@@ -35,12 +35,46 @@ class FakeSession:
         pass
 
 
-stub("db.session", SessionLocal=lambda: FakeSession())
-stub("db.models", Textbook=types.SimpleNamespace(subject="subject", grade="grade"))
+stub("db.session", SessionLocal=lambda: FakeSession(), get_db=lambda: FakeSession())
+stub("db.models", Textbook=types.SimpleNamespace(subject="subject", grade="grade"), User=object)
 stub("config")
 stub("config.constants", SUPPORTED_GRADES=[9, 10, 11, 12])
 sys.modules["config"].constants = sys.modules["config.constants"]
 stub("llm.client", LLMClient=lambda **kw: object())
+
+fake_user = types.SimpleNamespace(id="user-1")
+stub("auth")
+stub("auth.dependencies", get_current_user=lambda: fake_user)
+
+# payments.entitlement is stubbed here (unlike test_exam_route.py/test_payments_route.py, which
+# exercise the real module against a real SQLite db) - this file already mocks everything else
+# at this same lightweight level (db.session, db.models, retriever.*), and explain has no cacheable
+# resource to dedup against (resource_key is always None), so there's nothing entitlement-specific
+# left to verify beyond "blocked raises 402 pre-stream" / "allowed records after success", both
+# covered below with a plain counter instead of a real table.
+entitlement_state = {"blocked": False, "recorded": []}
+
+
+def fake_check_entitlement(db, user, feature, resource_key):
+    if entitlement_state["blocked"]:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=402,
+            detail={"message": "You've used all 8 free previews.", "used": 8, "quota": 8},
+        )
+    return True
+
+
+def fake_record_free_action(db, user, feature, resource_key):
+    entitlement_state["recorded"].append((feature, resource_key))
+
+
+stub("payments")
+stub(
+    "payments.entitlement",
+    check_entitlement=fake_check_entitlement,
+    record_free_action=fake_record_free_action,
+)
 
 
 class _Identity:
@@ -107,14 +141,25 @@ assert events[-1] == {
     "done": True,
     "answer": "The answer is X.",
     "citations": [{"textbook": "Chemistry Grade 9", "unit": "Unit 1", "page": None}],
-    "credits_charged": 0,
 }, events[-1]
+assert entitlement_state["recorded"] == [("explain", None)], entitlement_state  # charged on real success
 
-# --- mid-stream failure: an error event, not an HTTP error status (already 200) ---
+# --- mid-stream failure: an error event, not an HTTP error status (already 200); no free action
+# consumed, since check_entitlement's True only authorizes a charge AFTER a real success ---
+entitlement_state["recorded"].clear()
 workflow_state["fail"] = True
 r = c.post("/v1/explain", json={"grade": 9, "subject": "chemistry", "question": "What is an atom?"})
 assert r.status_code == 200, r.text
 events = parse_sse(r.text)
 assert events == [{"done": True, "error": "The AI service is busy or unreachable right now. Please try again in a minute."}], events
+assert entitlement_state["recorded"] == []
+workflow_state["fail"] = False
+
+# --- quota exhausted: a real HTTP 402 BEFORE the stream starts, not an SSE error event ---
+entitlement_state["blocked"] = True
+r = c.post("/v1/explain", json={"grade": 9, "subject": "chemistry", "question": "What is an atom?"})
+assert r.status_code == 402, r.text
+assert r.json()["detail"]["used"] == 8 and r.json()["detail"]["quota"] == 8, r.text
+entitlement_state["blocked"] = False
 
 print("EXPLAIN ROUTE SSE TESTS PASSED")

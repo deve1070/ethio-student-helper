@@ -87,6 +87,22 @@ assert set(b["natural_only"]) == {"biology", "chemistry", "physics"}
 assert set(b["social_only"]) == {"economics", "geography", "history"}
 assert set(b["common"]) == {"english", "scholastic_aptitude_test", "mathematics"}
 
+# ---- 3b2. subject_visible: the shared stream-filtering rule ESSLCE/Practice/Notes/Progress all read ------------
+from config.constants import subject_visible
+
+assert subject_visible("biology", "natural_science") is True
+assert subject_visible("history", "natural_science") is False  # social-only, hidden from a natural student
+assert subject_visible("history", "social_science") is True
+assert subject_visible("biology", "social_science") is False  # natural-only, hidden from a social student
+assert subject_visible("mathematics", "natural_science") is True  # common to both streams
+assert subject_visible("mathematics", "social_science") is True
+assert subject_visible("biology", None) is True  # no stream yet (grade 9-10): nothing is filtered
+assert subject_visible("history", None) is True
+# a subject outside the ESSLCE stream partition entirely (grade 9-10 Practice-only subjects) is never
+# hidden, regardless of stream - stream filtering has no opinion about it
+assert subject_visible("information_technology", "natural_science") is True
+assert subject_visible("information_technology", "social_science") is True
+
 # ---- 3c. /me (GET/PATCH): real bearer-token auth, no stub - onboarding profile fields ------------------------------
 auth_headers = {"Authorization": f"Bearer {token}"}
 r = c.get("/v1/auth/me", headers=auth_headers)

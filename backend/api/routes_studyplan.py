@@ -57,7 +57,13 @@ def _get_or_create_week(db: Session, user: User) -> StudyPlanWeek:
     profile = build_profile(db, user)
     profile["_stable_keys"] = current_keys
     week_plan = build_week_plan(profile)
-    week_plan = add_rationale(LLMClient(temperature=0.3, max_tokens=900), week_plan, profile)
+    # retry_attempts=1 (no retry at all): the rationale text is purely cosmetic and already designed
+    # to degrade to "no rationale" on any failure (studyplan/coach.py) - the default retry budget's
+    # rate-limit backoff (up to ~2 minutes) would otherwise make a REQUIRED plan generation wait on
+    # an OPTIONAL feature. Confirmed live: this is exactly what made /v1/study-plan/week hang for
+    # minutes under a Groq rate limit, for a call whose result the student never even sees as an error.
+    coach_llm = LLMClient(temperature=0.3, max_tokens=900, retry_attempts=1)
+    week_plan = add_rationale(coach_llm, week_plan, profile)
 
     row = StudyPlanWeek(
         user_id=user.id,

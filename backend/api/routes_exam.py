@@ -2,14 +2,14 @@ import uuid
 
 from agents.workflow import AgentWorkflow
 from auth.dependencies import get_current_user
-from db.models import CreditLedgerEntry, ExamQuestionSubmission, Textbook, User
+from db.models import ExamQuestionSubmission, Textbook, User
 from db.session import get_db
 from exams.cache import ExamCache
 from exams.ocr import extract_text_from_base64_image
 from fastapi import APIRouter, Depends, HTTPException
 from llm.client import LLMClient
 from llm.retry import LLMUnavailableError
-from payments.entitlement import require_credits
+from payments.entitlement import check_entitlement, record_free_action
 from pydantic import BaseModel, Field, model_validator
 from retriever.builder import RetrieverBuilder
 from retriever.decompose import DecomposingRetriever
@@ -24,10 +24,6 @@ _workflow = AgentWorkflow()
 _cache = ExamCache()
 # Splits broad questions ("what are the trends in...") into separate searches.
 _planner_llm = LLMClient(temperature=0, max_tokens=800)
-
-
-CREDIT_COST_CACHE_HIT = 0
-CREDIT_COST_FRESH_ANSWER = 1
 
 
 class ExamSolveRequest(BaseModel):
@@ -58,7 +54,6 @@ class ExamSolveResponse(BaseModel):
     citations: list[Citation]
 
     source: str
-    credits_charged: int
 
 
 @router.post("/solve", response_model=ExamSolveResponse)
@@ -102,13 +97,12 @@ def solve(
 
     cached = _cache.find_cached_answer(db, question_text, request.grade, subject)
     if cached is not None:
+        # Cached answers are always free - for everyone, subscribed or not - since serving one
+        # costs nothing beyond the DB lookup; never gated, never consumes a free action.
         question, answer = cached
         _cache.bump_times_asked(db, question)
         submission.matched_question_id = question.id
         db.commit()
-        _charge_credits(
-            db, user.id, CREDIT_COST_CACHE_HIT, question.id, "exam_solve_cached"
-        )
 
         return ExamSolveResponse(
             exam_question_id=question.id,
@@ -120,14 +114,15 @@ def solve(
                 )
             ],
             source="cache",
-            credits_charged=CREDIT_COST_CACHE_HIT,
         )
 
     logger.info(
         f"Cache miss for exam question in grade={request.grade}, subject={subject}; generating"
     )
 
-    require_credits(db, user.id, CREDIT_COST_FRESH_ANSWER)
+    # Every fresh solve is inherently a never-before-asked question - no resource_key dedup
+    # makes sense here (unlike notes/elaborate, there's nothing stable to re-view for free).
+    needs_charge = check_entitlement(db, user, "exam_solve", None)
 
     retriever = _retriever_builder.build_textbook_retriever(
         grade=request.grade, subject=subject
@@ -150,14 +145,14 @@ def solve(
 
     if result.get("is_relevant") is False:
         # The textbooks have nothing on this. The "not related" reply must not become the
-        # cached canonical answer for this question, and the student must not pay for it.
+        # cached canonical answer for this question, and the student must not be charged a
+        # free action for it.
         db.commit()  # keep the submission row: it shows which topics students ask about that we lack
         return ExamSolveResponse(
             exam_question_id=None,
             answer=result["draft_answer"],
             citations=[],
             source="no_match",
-            credits_charged=0,
         )
 
     if result.get("verification_status") in ("ERROR", "FAIL"):
@@ -166,14 +161,13 @@ def solve(
         # already used up its retries (agents/workflow.py's MAX_RESEARCH_ATTEMPTS) without
         # fixing it - previously this fell through to the exact same caching/charging path
         # as a passed answer despite being self-flagged as unsupported. Neither is cached as
-        # the canonical answer, and the student is not charged for either.
+        # the canonical answer, and the student is not charged a free action for either.
         db.commit()
         return ExamSolveResponse(
             exam_question_id=None,
             answer=result["draft_answer"],
             citations=[Citation(**c) for c in result.get("citations", [])],
             source="unverified",
-            credits_charged=0,
         )
 
     citations = result.get("citations", [])
@@ -190,30 +184,12 @@ def solve(
     )
     submission.matched_question_id = question.id
     db.commit()
-    _charge_credits(
-        db, user.id, CREDIT_COST_FRESH_ANSWER, question.id, "exam_solve_new"
-    )
+    if needs_charge:
+        record_free_action(db, user, "exam_solve", None)
 
     return ExamSolveResponse(
         exam_question_id=question.id,
         answer=answer.answer_text,
         citations=[Citation(**c) for c in citations],
         source="generated",
-        credits_charged=CREDIT_COST_FRESH_ANSWER,
     )
-
-
-def _charge_credits(
-    db: Session, user_id: uuid.UUID, cost: int, exam_question_id: uuid.UUID, reason: str
-) -> None:
-    if cost <= 0:
-        return
-    db.add(
-        CreditLedgerEntry(
-            user_id=user_id,
-            delta=-cost,
-            reason=reason,
-            related_exam_question_id=exam_question_id,
-        )
-    )
-    db.commit()

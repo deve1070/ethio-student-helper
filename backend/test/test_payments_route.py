@@ -7,6 +7,7 @@ import os
 import sys
 import types
 import uuid
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -60,6 +61,8 @@ import api.routes_payments as R
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+AMOUNT = R.SUBSCRIPTION_PLAN["amount_etb"]  # 300.0 - keep assertions in sync with the real plan price
+
 db = Session()
 student = M.User(id=uuid.uuid4(), full_name="Alice", is_admin=False)
 admin = M.User(id=uuid.uuid4(), full_name="Admin Bob", is_admin=True)
@@ -74,6 +77,21 @@ app.dependency_overrides[R.get_current_user] = lambda: student
 
 def _forbidden():
     raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def active_subscription(user_id):
+    # SQLite (unlike Postgres) doesn't actually preserve timezone-awareness on a
+    # DateTime(timezone=True) column - it comes back naive, so make it explicitly UTC-aware here
+    # for the arithmetic below rather than at every call site.
+    sub = (
+        db.query(M.Subscription)
+        .filter(M.Subscription.user_id == user_id, M.Subscription.status == "active")
+        .order_by(M.Subscription.current_period_end.desc())
+        .first()
+    )
+    if sub is not None and sub.current_period_end.tzinfo is None:
+        sub.current_period_end = sub.current_period_end.replace(tzinfo=timezone.utc)
+    return sub
 
 
 c = TestClient(app)
@@ -91,11 +109,11 @@ def check(label, cond):
 
 # ---- submit-receipt: auto-approved when the receipt matches what was typed -------------------
 vision_state["response"] = json.dumps(
-    {"readable": True, "amount_etb": 25.0, "transaction_id": "ABC123"}
+    {"readable": True, "amount_etb": AMOUNT, "transaction_id": "ABC123"}
 )
 r = c.post(
     "/v1/payments/submit-receipt",
-    data={"bundle": "bundle_5", "transaction_id": "abc-123"},  # dashes/case shouldn't matter
+    data={"plan": "yearly", "transaction_id": "abc-123"},  # dashes/case shouldn't matter
     files={"receipt": ("r.jpg", b"fake jpeg bytes", "image/jpeg")},
 )
 check("auto-approve status 200", r.status_code == 200)
@@ -103,44 +121,47 @@ body = r.json()
 check("auto-approve completed", body["status"] == "completed")
 payment_id_auto = body["payment_id"]
 db.expire_all()
-balance = sum(e.delta for e in db.query(M.CreditLedgerEntry).filter_by(user_id=student.id))
-check("auto-approve credited 5", balance == 5)
+sub = active_subscription(student.id)
+check("auto-approve granted an active subscription", sub is not None)
+check(
+    "auto-approve subscription expires ~365 days out",
+    abs((sub.current_period_end - datetime.now(timezone.utc)) - timedelta(days=365)) < timedelta(hours=1),
+)
 p = db.get(M.Payment, uuid.UUID(payment_id_auto))
 check("auto-approve verification_method", p.verification_method == "auto")
 
-# ---- submit-receipt: amount mismatch falls to pending, no credits granted --------------------
+# ---- submit-receipt: amount mismatch falls to pending, no subscription granted ----------------
 vision_state["response"] = json.dumps(
     {"readable": True, "amount_etb": 10.0, "transaction_id": "XYZ999"}
 )
 r = c.post(
     "/v1/payments/submit-receipt",
-    data={"bundle": "bundle_20", "transaction_id": "XYZ999"},
+    data={"plan": "yearly", "transaction_id": "XYZ999"},
     files={"receipt": ("r.jpg", b"fake jpeg bytes", "image/jpeg")},
 )
 check("mismatch status 200", r.status_code == 200)
 body = r.json()
 check("mismatch pending", body["status"] == "pending")
 payment_id_pending = body["payment_id"]
-db.expire_all()
-balance = sum(e.delta for e in db.query(M.CreditLedgerEntry).filter_by(user_id=student.id))
-check("mismatch did not grant credits", balance == 5)  # unchanged from before
+first_expiry = active_subscription(student.id).current_period_end
+check("mismatch did not extend the subscription", first_expiry == sub.current_period_end)
 
 # ---- submit-receipt: unreadable receipt also falls to pending ---------------------------------
 vision_state["response"] = json.dumps({"readable": False, "amount_etb": None, "transaction_id": None})
 r = c.post(
     "/v1/payments/submit-receipt",
-    data={"bundle": "bundle_5", "transaction_id": "WHATEVER"},
+    data={"plan": "yearly", "transaction_id": "WHATEVER"},
     files={"receipt": ("r.jpg", b"fake jpeg bytes", "image/jpeg")},
 )
 check("unreadable pending", r.json()["status"] == "pending")
 
-# ---- unknown bundle rejected ------------------------------------------------------------------
+# ---- unknown plan rejected ----------------------------------------------------------------------
 r = c.post(
     "/v1/payments/submit-receipt",
-    data={"bundle": "not_a_real_bundle", "transaction_id": "X"},
+    data={"plan": "not_a_real_plan", "transaction_id": "X"},
     files={"receipt": ("r.jpg", b"fake", "image/jpeg")},
 )
-check("unknown bundle 400", r.status_code == 400)
+check("unknown plan 400", r.status_code == 400)
 
 # ---- pending list + approve/reject: admin-only -------------------------------------------------
 app.dependency_overrides[R.require_admin] = _forbidden
@@ -159,13 +180,21 @@ check("pending list count is 2", len(r.json()) == 2)
 r = c.post(f"/v1/payments/{payment_id_pending}/approve")
 check("manual approve OK", r.status_code == 200 and r.json()["status"] == "completed")
 db.expire_all()
-balance = sum(e.delta for e in db.query(M.CreditLedgerEntry).filter_by(user_id=student.id))
-check("manual approve credited 20 more", balance == 25)
+sub = active_subscription(student.id)
+check(
+    "manual approve of a second payment EXTENDS the existing subscription by 365 more days",
+    abs((sub.current_period_end - first_expiry) - timedelta(days=365)) < timedelta(hours=1),
+)
 p = db.get(M.Payment, uuid.UUID(payment_id_pending))
 check("manual approve reviewed_by set", p.reviewed_by == admin.id)
 
 r = c.post(f"/v1/payments/{payment_id_pending}/approve")  # already completed - idempotent, not a 409
 check("re-approve already-completed is idempotent", r.status_code == 200 and r.json()["status"] == "completed")
+db.expire_all()
+check(
+    "re-approving an already-completed payment does not extend the subscription again",
+    active_subscription(student.id).current_period_end == sub.current_period_end,
+)
 
 r = c.get("/v1/payments/pending")
 check("one payment still pending after approving the other", len(r.json()) == 1)
@@ -175,10 +204,10 @@ check("reject OK", r.status_code == 200 and r.json()["status"] == "failed")
 r = c.get("/v1/payments/pending")
 check("none pending after rejecting the last one", len(r.json()) == 0)
 
-# ---- /v1/me/credits still works, gateway-agnostic ----------------------------------------------
-r = c.get("/v1/me/credits")
-check("me/credits 200", r.status_code == 200)
-check("me/credits balance 25", r.json()["balance"] == 25)
+# ---- /v1/me/entitlement reflects the active subscription ---------------------------------------
+r = c.get("/v1/me/entitlement")
+check("me/entitlement 200", r.status_code == 200)
+check("me/entitlement has_active_subscription true", r.json()["has_active_subscription"] is True)
 
 # ---- referral count: increments by exactly 1 on the referred student's FIRST completed payment,
 # never again on a later one - covering both the auto-approve and manual-approve completion paths ----
@@ -188,10 +217,10 @@ db.add_all([referrer, referred])
 db.commit()
 
 app.dependency_overrides[R.get_current_user] = lambda: referred
-vision_state["response"] = json.dumps({"readable": True, "amount_etb": 25.0, "transaction_id": "REF1"})
+vision_state["response"] = json.dumps({"readable": True, "amount_etb": AMOUNT, "transaction_id": "REF1"})
 r = c.post(
     "/v1/payments/submit-receipt",
-    data={"bundle": "bundle_5", "transaction_id": "REF1"},
+    data={"plan": "yearly", "transaction_id": "REF1"},
     files={"receipt": ("r.jpg", b"fake", "image/jpeg")},
 )
 check("referred student's first payment auto-approved", r.json()["status"] == "completed")
@@ -202,7 +231,7 @@ check("referrer was notified on Telegram", any(uid == referrer.id for uid, _ in 
 vision_state["response"] = json.dumps({"readable": False, "amount_etb": None, "transaction_id": None})
 r = c.post(
     "/v1/payments/submit-receipt",
-    data={"bundle": "bundle_5", "transaction_id": "REF2"},
+    data={"plan": "yearly", "transaction_id": "REF2"},
     files={"receipt": ("r.jpg", b"fake", "image/jpeg")},
 )
 check("referred student's second payment falls to pending first", r.json()["status"] == "pending")
