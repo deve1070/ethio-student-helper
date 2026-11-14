@@ -341,6 +341,16 @@ export interface EsslceExamCover {
   item_count: number
   sections: string[]
 }
+export interface UnitInsight {
+  available: boolean
+  question_count: number
+  years_appeared: number
+  total_years: number
+  per_year: Record<string, number>
+  concepts: string[]
+  styles: string[]
+  tips: string[]
+}
 export const esslce = {
   subjects: () => get<{ subjects: { subject: string; questions: number }[] }>("/v1/esslce/subjects"),
   papers: (subject: string) => get<{ subject: string; papers: EsslcePaper[] }>("/v1/esslce/papers", { subject }),
@@ -384,6 +394,8 @@ export const esslce = {
       message,
       history,
     }),
+  unitInsight: (subject: string, unit: string, grade: number) =>
+    get<UnitInsight>("/v1/esslce/unit-insight", { subject, unit, grade }),
   reviewCount: () =>
     get<{ total: number; subjects: { subject: string; due: number }[] }>("/v1/esslce/review-count"),
   examSummary: (paper_id: number) => post<ExamSummary>("/v1/esslce/exam-summary", { paper_id }),

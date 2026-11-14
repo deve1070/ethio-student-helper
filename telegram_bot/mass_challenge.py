@@ -192,6 +192,7 @@ def _schedule_questions(job_queue, challenge: dict, pending: list, first_delay: 
             "label": label,
             "topic_id": topic_id,
             "question_ids": challenge["question_ids"],
+            "unit": (challenge["subject"], challenge["grade"], challenge["unit"]),
         },
         name=f"mass-challenge-{challenge_id}-reveal",
     )
@@ -238,6 +239,7 @@ async def resume_after_restart(application) -> None:
                     "label": STREAM_LABELS.get(challenge["stream"], ""),
                     "topic_id": TOPIC_IDS.get(challenge["stream"]),
                     "question_ids": challenge["question_ids"],
+                    "unit": (challenge["subject"], challenge["grade"], challenge["unit"]),
                 },
                 name=f"mass-challenge-{challenge['id']}-reveal",
             )
@@ -389,6 +391,38 @@ async def reveal(context: ContextTypes.DEFAULT_TYPE) -> None:
         lambda: context.bot.send_message(TELEGRAM_PRIVATE_GROUP_ID, results, message_thread_id=topic_id)
     )
     await _post_answer_key(context, challenge_id, context.job.data.get("question_ids", []), prefix, topic_id)
+    if context.job.data.get("unit"):
+        await _post_unit_insight(context, *context.job.data["unit"], prefix, topic_id)
+
+
+async def _post_unit_insight(context, subject: str, grade, unit: str, prefix: str, topic_id) -> None:
+    """Last message of the reveal: how today's unit is tested in past papers."""
+    try:
+        insight = await asyncio.to_thread(api_client.unit_insight, subject, unit, grade)
+    except BackendError:
+        logger.exception("Could not fetch the unit insight for %s / %s", subject, unit)
+        return
+    if not insight["available"]:
+        return
+    text = unit_insight_text(insight, f"{prefix}How {clip(unit, 60)} is tested")
+    await _send_with_retry(
+        lambda: context.bot.send_message(TELEGRAM_PRIVATE_GROUP_ID, text, message_thread_id=topic_id)
+    )
+
+
+def unit_insight_text(insight: dict, title: str) -> str:
+    lines = [
+        f"📈 {title}",
+        f"In {insight['years_appeared']} of the {insight['total_years']} past exams in the bank "
+        f"({insight['question_count']} questions so far).",
+        "\nComes up again and again:",
+        *[f"• {c}" for c in insight["concepts"]],
+        "\nHow it's asked:",
+        *[f"• {c}" for c in insight["styles"]],
+        "\nTips:",
+        *[f"• {c}" for c in insight["tips"]],
+    ]
+    return "\n".join(lines)[:4000]
 
 
 def _has_math(text: str | None) -> bool:

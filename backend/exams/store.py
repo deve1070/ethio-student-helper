@@ -1513,10 +1513,16 @@ def pick_todays_challenges(db, today) -> list[dict]:
 def pick_mass_challenge_questions(
     db, subject: str, grade: int | None, unit: str, count: int
 ) -> list[int]:
-    """The same unit-filtered eligible pool /esslce/next's own `unit` request param builds (same
-    query shape as eligible_units() above, narrowed to one (grade, unit) instead of counting every
-    one) - sampled down to `count` question ids. Runs once a day (not per-request), so the simpler,
-    fully-ORM-free column query here doesn't need /next's own lightweight-query optimization."""
+    """unit_question_ids sampled down to `count` question ids."""
+    matching_ids = unit_question_ids(db, subject, grade, unit)
+    return random.sample(matching_ids, min(count, len(matching_ids)))
+
+
+def unit_question_ids(db, subject: str, grade: int | None, unit: str) -> list[int]:
+    """Every eligible question whose best textbook link is this (grade, unit), sorted by id - the
+    same unit-filtered pool /esslce/next's own `unit` request param builds (same query shape as
+    eligible_units() above, narrowed to one unit). Not per-request: the mass challenge uses it once
+    a day and the unit insight once per unit, so the simpler column query is enough."""
     rows = (
         db.query(
             EsslceQuestion.id,
@@ -1541,8 +1547,90 @@ def pick_mass_challenge_questions(
         links.sort(key=lambda l: (not l.verified, l.score if l.score is not None else 9.0, l.rank))
         if links[0].unit == unit and (grade is None or links[0].grade == grade):
             matching_ids.append(qid)
-    matching_ids.sort()  # deterministic base order before random sampling
-    return random.sample(matching_ids, min(count, len(matching_ids)))
+    matching_ids.sort()
+    return matching_ids
+
+
+UNIT_INSIGHT_MIN_QUESTIONS = 3  # fewer past questions than this isn't a pattern worth summarising
+UNIT_INSIGHT_SAMPLE = 15  # past questions shown to the model; the counts always use all of them
+
+UNIT_INSIGHT_PROMPT = """Below are real questions from past Ethiopian Grade 12 national exams (ESSLCE) in \
+{subject}, all from the textbook unit "{unit}", each with its correct answer.
+
+{questions}
+
+Using ONLY these questions, describe how this unit is tested. Do not add topics that are not in the \
+questions above. Write plain text with no LaTeX, no markdown and no symbols like $ or \\.
+Reply with only a JSON object:
+{{"concepts": ["3 to 5 concepts or facts that come up again and again"],
+  "styles": ["2 or 3 ways questions are asked, e.g. calculate a value, pick the correct statement, interpret a graph"],
+  "tips": ["2 or 3 short, concrete tips for answering these questions correctly"]}}"""
+
+
+def unit_exam_stats(db, subject: str, grade: int | None, unit: str) -> dict:
+    """How often a unit appears in past papers, counted from the exam bank itself: question ids,
+    years (E.C.) it appeared in, questions per year, and how many distinct years the subject has."""
+    ids = unit_question_ids(db, subject, grade, unit)
+    per_year: dict = {}
+    if ids:
+        for year in (
+            db.query(EsslcePaper.year_ec)
+            .join(EsslceQuestion, EsslceQuestion.paper_id == EsslcePaper.id)
+            .filter(EsslceQuestion.id.in_(ids))
+        ):
+            per_year[year[0]] = per_year.get(year[0], 0) + 1
+    total_years = (
+        db.query(EsslcePaper.year_ec).filter(EsslcePaper.subject == subject).distinct().count()
+    )
+    return {
+        "question_ids": ids,
+        "per_year": dict(sorted(per_year.items())),
+        "years_appeared": len(per_year),
+        "total_years": total_years,
+    }
+
+
+def get_or_create_unit_insight(db, llm, subject: str, grade: int | None, unit: str):
+    """Cached per unit (UnitInsight), generated on first request. Returns None when the unit has
+    too few past questions to show a pattern, or the model's reply can't be used."""
+    from exams.models import UnitInsight
+
+    row = (
+        db.query(UnitInsight)
+        .filter(UnitInsight.subject == subject, UnitInsight.grade == grade, UnitInsight.unit == unit)
+        .one_or_none()
+    )
+    if row is not None:
+        return row
+
+    stats = unit_exam_stats(db, subject, grade, unit)
+    if len(stats["question_ids"]) < UNIT_INSIGHT_MIN_QUESTIONS:
+        return None
+    sample = random.Random(0).sample(stats["question_ids"], min(UNIT_INSIGHT_SAMPLE, len(stats["question_ids"])))
+    questions = db.query(EsslceQuestion).filter(EsslceQuestion.id.in_(sample)).all()
+    listing = "\n\n".join(
+        f"Q{i + 1}. {q.stem}\n"
+        + "\n".join(f"  {L}) {opt}" for L, opt in zip("ABCD", q.options or []))
+        + f"\n  Answer: {'ABCD'[q.answer_index]}"
+        for i, q in enumerate(questions)
+    )
+    raw = llm.chat(
+        messages=[{"role": "user", "content": UNIT_INSIGHT_PROMPT.format(subject=subject, unit=unit, questions=listing)}]
+    )["choices"][0]["message"]["content"] or ""
+    data = parse_json_object(raw)
+    if not data or not all(isinstance(data.get(k), list) and data[k] for k in ("concepts", "styles", "tips")):
+        return None
+    row = UnitInsight(
+        subject=subject,
+        grade=grade,
+        unit=unit,
+        concepts=[str(x) for x in data["concepts"]][:5],
+        styles=[str(x) for x in data["styles"]][:3],
+        tips=[str(x) for x in data["tips"]][:3],
+    )
+    db.add(row)
+    db.commit()
+    return row
 
 
 # ---------------------------------------------------------------------------- student progress + recommendation

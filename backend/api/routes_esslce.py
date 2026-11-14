@@ -12,7 +12,7 @@ never reimplemented, so there is exactly one definition of "safe to show a stude
 import base64
 from types import SimpleNamespace
 
-from auth.dependencies import get_current_user
+from auth.dependencies import get_current_user, require_student_or_bot
 from config import constants
 from config.constants import CALCULATION_SUBJECTS, ESSLCE_SKILL_STRAND_SUBJECTS, subject_visible
 from db.models import User
@@ -34,6 +34,8 @@ from exams.store import (
     skill_strand,
     student_progress,
     review_due_ids,
+    get_or_create_unit_insight,
+    unit_exam_stats,
 )
 from fastapi import APIRouter, Depends, HTTPException
 from llm.client import LLMClient
@@ -540,6 +542,37 @@ def diagnostic(
             status_code=404, detail=f"No {request.subject} questions are ready for a diagnostic yet."
         )
     return NextResponse(paper_id=None, questions=_build_outputs(db, rows))
+
+
+class UnitInsightResponse(BaseModel):
+    available: bool  # False when the unit has too few past questions to show a pattern
+    question_count: int
+    years_appeared: int
+    total_years: int
+    per_year: dict[int, int]  # year (E.C.) -> questions from this unit that year
+    concepts: list[str] = []
+    styles: list[str] = []
+    tips: list[str] = []
+
+
+@router.get(
+    "/unit-insight", response_model=UnitInsightResponse, dependencies=[Depends(require_student_or_bot)]
+)
+def unit_insight(subject: str, unit: str, grade: int | None = None, db: Session = Depends(get_db)) -> UnitInsightResponse:
+    """How a textbook unit is tested in past papers. The counts come straight from the exam bank;
+    the summary is generated once per unit and shared (no free-action charge - it is the same for
+    every student)."""
+    stats = unit_exam_stats(db, subject, grade, unit)
+    base = dict(
+        question_count=len(stats["question_ids"]),
+        years_appeared=stats["years_appeared"],
+        total_years=stats["total_years"],
+        per_year=stats["per_year"],
+    )
+    row = get_or_create_unit_insight(db, LLMClient(temperature=0, max_tokens=900), subject, grade, unit)
+    if row is None:
+        return UnitInsightResponse(available=False, **base)
+    return UnitInsightResponse(available=True, concepts=row.concepts, styles=row.styles, tips=row.tips, **base)
 
 
 @router.get("/review-count")

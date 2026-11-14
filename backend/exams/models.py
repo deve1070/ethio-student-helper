@@ -301,3 +301,21 @@ class PrivateGroupMembership(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     joined_at = Column(DateTime, server_default=func.now())
+
+
+class UnitInsight(Base):
+    """"How this unit is tested", generated once per textbook unit from that unit's real past ESSLCE
+    questions (exams/store.py's get_or_create_unit_insight) and shared by every student. Only the
+    model's summary is stored; the counts (years, questions per year) are recomputed from the exam
+    bank on every read, so they stay right as new papers are loaded."""
+
+    __tablename__ = "unit_insights"
+    id = Column(Integer, primary_key=True)
+    subject = Column(String(64), nullable=False)
+    grade = Column(Integer)
+    unit = Column(String(255), nullable=False)
+    concepts = Column(JSON, nullable=False)
+    styles = Column(JSON, nullable=False)
+    tips = Column(JSON, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    __table_args__ = (UniqueConstraint("subject", "grade", "unit", name="uq_unit_insight"),)

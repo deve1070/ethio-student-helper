@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { ArrowLeft, ChevronRight, Layers } from "lucide-react"
 import { CardButton } from "../../components/ui/Card"
+import { UnitInsightPanel } from "../../components/esslce/UnitInsightPanel"
 import { EmptyState, ErrorBanner, FullPageSpinner } from "../../components/ui/Primitives"
 import { errorMessage, esslce } from "../../lib/api"
 
@@ -53,23 +54,25 @@ export function EsslceUnitsPage() {
       {loaded && units!.length > 0 && (
         <div className="flex flex-col gap-2.5">
           {units!.map((u) => (
-            <CardButton
-              key={`${u.grade}-${u.unit}`}
-              onClick={() =>
-                navigate(
-                  `/esslce/${encodeURIComponent(subject)}/session?mode=practice&unit=${encodeURIComponent(u.unit)}&grade=${u.grade}`,
-                )
-              }
-              className="flex items-center justify-between p-4"
-            >
-              <div>
-                <p className="font-medium text-zinc-900">{u.unit}</p>
-                <p className="text-sm text-zinc-500">
-                  Grade {u.grade} - {u.questions} question{u.questions === 1 ? "" : "s"}
-                </p>
-              </div>
-              <ChevronRight className="size-5 text-zinc-300" aria-hidden />
-            </CardButton>
+            <div key={`${u.grade}-${u.unit}`} className="flex flex-col gap-2">
+              <CardButton
+                onClick={() =>
+                  navigate(
+                    `/esslce/${encodeURIComponent(subject)}/session?mode=practice&unit=${encodeURIComponent(u.unit)}&grade=${u.grade}`,
+                  )
+                }
+                className="flex items-center justify-between p-4"
+              >
+                <div>
+                  <p className="font-medium text-zinc-900">{u.unit}</p>
+                  <p className="text-sm text-zinc-500">
+                    Grade {u.grade} - {u.questions} question{u.questions === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <ChevronRight className="size-5 text-zinc-300" aria-hidden />
+              </CardButton>
+              <UnitInsightPanel subject={subject} unit={u.unit} grade={u.grade} />
+            </div>
           ))}
         </div>
       )}

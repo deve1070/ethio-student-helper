@@ -415,3 +415,15 @@ def weekly_reports() -> list[dict]:
     )
     _raise_for_status(response)
     return response.json()["reports"]
+
+
+def unit_insight(subject: str, unit: str, grade: int | None) -> dict:
+    # first request for a unit runs one LLM call (cached after), hence the long timeout
+    params = {"subject": subject, "unit": unit}
+    if grade is not None:
+        params["grade"] = grade
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/esslce/unit-insight", params=params, headers=_bot_headers(), timeout=180
+    )
+    _raise_for_status(response)
+    return response.json()
