@@ -22,7 +22,7 @@ def stub(name, **attrs):
 
 
 stub("auth")
-stub("auth.dependencies", get_current_user=lambda: None)
+stub("auth.dependencies", get_current_user=lambda: None, require_student_or_bot=lambda: None)
 stub("db.session", get_db=lambda: None)
 
 # routes_esslce.py builds a textbook-store connection and (per /elaborate call) an LLM client at import/
