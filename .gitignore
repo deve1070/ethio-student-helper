@@ -34,3 +34,7 @@ backend/README_UPDATE.txt
 backend/setup_update.py
 /project.zip
 /check_pdf.py
+
+# One-off Playwright screenshot/debug scripts
+frontend/*_shot.mjs
+frontend/*debug*.mjs

@@ -201,9 +201,12 @@ a volume, or every deploy logs all students out.
 ## Status
 
 Pre-launch. Known gaps:
-- Vector search has no ANN index (no HNSW), so every search scans the whole collection. That
-  is fine at the current corpus size; add one before the corpus or traffic grows a lot.
-- The leaderboard endpoints are public and show full names.
+- Vector search has no ANN (HNSW) index, on purpose. Every textbook search filters by grade and
+  subject first, which the metadata index narrows to about a thousand chunks, then sorts those
+  exactly: measured at about 50ms on the full 26,000-chunk collection. An HNSW index would make
+  those filtered searches approximate and could return fewer than the requested results. Worth
+  revisiting only if unfiltered searches become common or the corpus grows by an order of
+  magnitude.
 - Mass practice runs on in-memory scheduled jobs. A restart resumes from the polls already
   recorded, but a long outage can still lose a day's event.
 - There is no Flutter client yet; the PWA is the mobile app for now.
