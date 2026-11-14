@@ -11,6 +11,10 @@ sys.path.insert(0, ".")
 auth_pkg = types.ModuleType("auth")
 auth_dep = types.ModuleType("auth.dependencies")
 auth_dep.get_current_user = lambda: (_ for _ in ()).throw(RuntimeError("overridden in test"))
+# the progress router now also imports the mass-challenge router (for the weekly reports), which
+# needs these two; neither is called by the /streak test
+auth_dep.require_bot_internal_token = lambda: None
+auth_dep.require_student_or_bot = lambda: None
 sys.modules["auth"] = auth_pkg
 sys.modules["auth.dependencies"] = auth_dep
 dbs = types.ModuleType("db.session")
