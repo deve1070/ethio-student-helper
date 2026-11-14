@@ -217,15 +217,17 @@ check("the student with more correct answers ranks first", ranked[0][0] == stude
 check("the student with fewer correct answers ranks second", ranked[1][0] == runner_up.id)
 
 
-# ---- late answers: after a question's group poll has closed, an answer is a catch-up answer ------
-from api.routes_mass_challenge import is_late_answer  # noqa: E402
+# ---- is_closed: catch-up serves, and scores as late, only questions finished in the group ------
+from api.routes_mass_challenge import is_closed  # noqa: E402
 
-check("answer while the poll is open is on time", is_late_answer(30.0, 90, True) is False)
-check("answer inside the closing grace is on time", is_late_answer(95.0, 90, True) is False)
-check("answer after the poll closed is late", is_late_answer(200.0, 90, True) is True)
-check("no poll for this question, event not started: on time", is_late_answer(None, 90, False) is False)
-check("no poll for this question, event under way: late", is_late_answer(None, 90, True) is True)
-
+check("before the event nothing is closed", is_closed(0, {}, 90) is False)
+check("a poll still open is not closed", is_closed(0, {0: 30.0}, 90) is False)
+check("inside the closing grace is not closed", is_closed(0, {0: 95.0}, 90) is False)
+check("a poll past its open period is closed", is_closed(0, {0: 200.0}, 90) is True)
+check("a question not posted yet, mid-event, is not closed", is_closed(2, {0: 200.0, 1: 30.0}, 90) is False)
+check("a failed send the event moved past is closed", is_closed(1, {0: 300.0, 2: 30.0}, 90) is True)
+check("the last question's failed send closes once its slot has passed", is_closed(5, {4: 300.0}, 90) is True)
+check("...but not while its slot could still come", is_closed(5, {4: 120.0}, 90) is False)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

@@ -35,6 +35,7 @@ router = APIRouter(prefix="/v1/mass-challenge", tags=["mass-challenge"])
 
 MASS_MODES = ("mass", "mass_late")  # EsslceAttempt.mode values that count as mass-practice participation
 POLL_CLOSE_GRACE_SECONDS = 10  # a vote Telegram accepted just before closing can arrive slightly after
+EVENT_SLOT_SLACK_SECONDS = 60  # is_closed: the bot's 15s breather between polls, plus send retries
 
 
 class TodayChallengeResponse(BaseModel):
@@ -83,7 +84,8 @@ class RemainingResponse(BaseModel):
     subject: str
     unit: str
     total: int
-    remaining_question_ids: list[int]
+    remaining_question_ids: list[int]  # unanswered AND already closed in the group - what catch-up may serve
+    not_open_yet: int  # unanswered but still upcoming or live in the group - catch-up never serves these
 
 
 class AtRiskStudent(BaseModel):
@@ -387,7 +389,7 @@ def answer(
         raise HTTPException(status_code=404, detail="Question not found.")
 
     is_correct = request.chosen_index == question.answer_index
-    late = _poll_closed(db, challenge, question.id)
+    late = _closed_by_question(db, challenge)[question.id]
     db.add(
         EsslceAttempt(
             user_id=user.id,
@@ -403,27 +405,38 @@ def answer(
     return MassAnswerResponse(recorded=True, is_correct=is_correct, late=late)
 
 
-def is_late_answer(seconds_since_poll: float | None, question_seconds: int, challenge_has_polls: bool) -> bool:
-    """Whether an answer arriving now is after that question's group poll closed.
-    seconds_since_poll is None when this question has no poll row: before the event starts that
-    means "not late"; once the challenge has posted any poll it means this question's own poll
-    was never recorded (a failed send), and the event has moved on without it."""
-    if seconds_since_poll is None:
-        return challenge_has_polls
-    return seconds_since_poll > question_seconds + POLL_CLOSE_GRACE_SECONDS
+def is_closed(index: int, since_by_index: dict, question_seconds: int) -> bool:
+    """Whether the question at position `index` in the day's list is finished in the group.
+    since_by_index maps the position of every question that has a poll to the seconds since that
+    poll was sent. A question with its own poll is closed once that poll's open period is over.
+    One without a poll is either not posted yet or its send failed; it counts as closed only once
+    the event has moved past it - a later question has a poll, or the newest poll is older than a
+    full extra question slot, so the next one would already have been posted."""
+    if index in since_by_index:
+        return since_by_index[index] > question_seconds + POLL_CLOSE_GRACE_SECONDS
+    if not since_by_index:
+        return False
+    if max(since_by_index) > index:
+        return True
+    return min(since_by_index.values()) > 2 * question_seconds + EVENT_SLOT_SLACK_SECONDS
 
 
-def _poll_closed(db: Session, challenge: MassChallenge, question_id: int) -> bool:
-    since = (
-        db.query(func.extract("epoch", func.now() - func.max(MassChallengePoll.sent_at)))
-        .filter(MassChallengePoll.challenge_id == challenge.id, MassChallengePoll.question_id == question_id)
-        .scalar()
+def _closed_by_question(db: Session, challenge: MassChallenge) -> dict:
+    rows = (
+        db.query(
+            MassChallengePoll.question_id,
+            func.extract("epoch", func.now() - func.max(MassChallengePoll.sent_at)),
+        )
+        .filter(MassChallengePoll.challenge_id == challenge.id)
+        .group_by(MassChallengePoll.question_id)
+        .all()
     )
-    has_polls = (
-        db.query(MassChallengePoll.id).filter(MassChallengePoll.challenge_id == challenge.id).first()
-        is not None
-    )
-    return is_late_answer(float(since) if since is not None else None, challenge.question_seconds, has_polls)
+    position = {qid: i for i, qid in enumerate(challenge.question_ids)}
+    since_by_index = {position[qid]: float(since) for qid, since in rows if qid in position}
+    return {
+        qid: is_closed(i, since_by_index, challenge.question_seconds)
+        for i, qid in enumerate(challenge.question_ids)
+    }
 
 
 @router.get("/{challenge_id}/remaining", response_model=RemainingResponse)
@@ -441,12 +454,23 @@ def remaining(
             EsslceAttempt.user_id == user.id, EsslceAttempt.mass_challenge_id == challenge_id
         )
     }
+    # Only questions already finished in the group. The heads-up creates the challenge minutes
+    # before the event, so serving every unanswered question would let a student see the questions
+    # early and have their answers count as on time, or, mid-event, get the correct answer to a
+    # question whose poll hasn't opened yet and post it in the group.
+    closed_by_question = _closed_by_question(db, challenge)
+
+    def closed(question_id: int) -> bool:
+        return closed_by_question[question_id]
+
+    unanswered = [q for q in challenge.question_ids if q not in answered]
     return RemainingResponse(
         challenge_id=challenge.id,
         subject=challenge.subject,
         unit=challenge.unit,
         total=len(challenge.question_ids),
-        remaining_question_ids=[q for q in challenge.question_ids if q not in answered],
+        remaining_question_ids=[q for q in unanswered if closed(q)],
+        not_open_yet=sum(1 for q in unanswered if not closed(q)),
     )
 
 

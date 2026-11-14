@@ -530,6 +530,13 @@ async def _send_catchup_question(context, user_id: int, challenge_id: int) -> No
         )
         return
     remaining = progress["remaining_question_ids"]
+    if not remaining and progress["not_open_yet"]:
+        await context.bot.send_message(
+            user_id,
+            "Today's questions are still coming up or live in the group - answer them there. "
+            "Catch-up opens for each question once its poll closes.",
+        )
+        return
     if not remaining:
         await context.bot.send_message(
             user_id,
