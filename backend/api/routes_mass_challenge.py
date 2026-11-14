@@ -11,7 +11,7 @@ recorded when their PollAnswer update arrives); the two leaderboard reads are in
 import base64
 from datetime import date, datetime, timedelta
 
-from auth.dependencies import get_current_user, require_bot_internal_token
+from auth.dependencies import get_current_user, require_bot_internal_token, require_student_or_bot
 from config.settings import settings
 from db.models import TelegramLink, User
 from db.session import get_db
@@ -159,7 +159,12 @@ class LatestChallengesResponse(BaseModel):
 
 
 def _display_name(user: User) -> str:
-    return user.full_name or f"Student {str(user.id)[:4]}"
+    """First name and last initial ("Dawit K."). Leaderboards are seen by every other student and
+    posted in the Telegram group, so they never carry a full name."""
+    parts = (user.full_name or "").split()
+    if not parts:
+        return f"Student {str(user.id)[:4]}"
+    return parts[0] if len(parts) == 1 else f"{parts[0]} {parts[-1][0]}."
 
 
 def _to_response(challenge: MassChallenge) -> TodayChallengeResponse:
@@ -197,7 +202,7 @@ def latest_challenges(db: Session = Depends(get_db)) -> LatestChallengesResponse
     "/today", response_model=TodayChallengesResponse, dependencies=[Depends(require_bot_internal_token)]
 )
 def today(db: Session = Depends(get_db)) -> TodayChallengesResponse:
-    today_date = date.today()
+    today_date = today_local()
     existing = db.query(MassChallenge).filter(MassChallenge.date == today_date).all()
     if existing:
         return TodayChallengesResponse(challenges=[_to_response(c) for c in existing])
@@ -257,7 +262,7 @@ def today_state(db: Session = Depends(get_db)) -> TodayStateResponse:
     still owed. seconds_since_last_poll is measured against the database's own clock (the same
     clock that stamped MassChallengePoll.sent_at), not this server's."""
     out = []
-    for challenge in db.query(MassChallenge).filter(MassChallenge.date == date.today()).all():
+    for challenge in db.query(MassChallenge).filter(MassChallenge.date == today_local()).all():
         polls = db.query(MassChallengePoll).filter(MassChallengePoll.challenge_id == challenge.id).all()
         since_last = None
         if polls:
@@ -451,7 +456,7 @@ def at_risk(db: Session = Depends(get_db)) -> AtRiskResponse:
     answered anything today, and today's challenge exists. Each comes with the challenge to catch
     up on - their own stream's on a stream-split day, the shared one otherwise. For the bot's
     evening reminder, which messages only these students, not the whole group."""
-    challenges = db.query(MassChallenge).filter(MassChallenge.date == date.today()).all()
+    challenges = db.query(MassChallenge).filter(MassChallenge.date == today_local()).all()
     if not challenges:
         return AtRiskResponse(students=[])
     by_stream = {c.stream: c for c in challenges}
@@ -484,7 +489,7 @@ def at_risk(db: Session = Depends(get_db)) -> AtRiskResponse:
     return AtRiskResponse(students=students)
 
 
-@router.get("/weekly-leaderboard", response_model=WeeklyLeaderboardResponse)
+@router.get("/weekly-leaderboard", response_model=WeeklyLeaderboardResponse, dependencies=[Depends(require_student_or_bot)])
 def weekly_leaderboard(db: Session = Depends(get_db)) -> WeeklyLeaderboardResponse:
     """Score ranking over the last 7 local days (today included). On-time answers only
     (mode="mass") - a catch-up answer is given after the correct answers were posted."""
@@ -517,7 +522,7 @@ def weekly_leaderboard(db: Session = Depends(get_db)) -> WeeklyLeaderboardRespon
     return WeeklyLeaderboardResponse(entries=entries)
 
 
-@router.get("/{challenge_id}/leaderboard", response_model=ChallengeLeaderboardResponse)
+@router.get("/{challenge_id}/leaderboard", response_model=ChallengeLeaderboardResponse, dependencies=[Depends(require_student_or_bot)])
 def challenge_leaderboard(challenge_id: int, db: Session = Depends(get_db)) -> ChallengeLeaderboardResponse:
     challenge = db.get(MassChallenge, challenge_id)
     if challenge is None:
@@ -557,7 +562,7 @@ def challenge_leaderboard(challenge_id: int, db: Session = Depends(get_db)) -> C
     )
 
 
-@router.get("/consistency-leaderboard", response_model=ConsistencyLeaderboardResponse)
+@router.get("/consistency-leaderboard", response_model=ConsistencyLeaderboardResponse, dependencies=[Depends(require_student_or_bot)])
 def consistency_leaderboard(db: Session = Depends(get_db)) -> ConsistencyLeaderboardResponse:
     rows = (
         db.query(EsslceAttempt.user_id, EsslceAttempt.created_at)

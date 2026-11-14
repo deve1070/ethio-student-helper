@@ -380,7 +380,9 @@ def mass_challenge_at_risk() -> list[dict]:
 
 def mass_challenge_leaderboard(challenge_id: int) -> dict:
     response = httpx.get(
-        f"{BACKEND_BASE_URL}/v1/mass-challenge/{challenge_id}/leaderboard", timeout=15
+        f"{BACKEND_BASE_URL}/v1/mass-challenge/{challenge_id}/leaderboard",
+        headers=_bot_headers(),
+        timeout=15,
     )
     _raise_for_status(response)
     return response.json()

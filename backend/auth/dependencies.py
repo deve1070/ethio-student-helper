@@ -47,3 +47,14 @@ def require_bot_internal_token(
     impersonation mechanism."""
     if not secrets.compare_digest(credentials.credentials, settings.BOT_INTERNAL_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid bot token")
+
+
+def require_student_or_bot(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> None:
+    """A logged-in student (the web app's leaderboard page) or the bot itself (the group's reveal
+    message). Neither path needs to know which; this only keeps the endpoint off the open internet."""
+    if secrets.compare_digest(credentials.credentials, settings.BOT_INTERNAL_TOKEN):
+        return
+    get_current_user(credentials, db)
