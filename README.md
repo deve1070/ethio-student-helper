@@ -21,6 +21,13 @@ weekly study plan, and a daily group practice in Telegram with a leaderboard.
   "Ask about this" chat, both grounded in the textbook.
 - **Practice and mistakes** — unit-based practice from the approved question bank, accuracy
   per unit, and a review of past mistakes.
+- **Spaced review** — a question answered wrong comes back 1, 3 and 7 days later until it's
+  answered right three times in a row; due questions are on the dashboard and in the bot.
+- **How each unit is tested** — for every textbook unit: how many past exams included it, how many
+  questions, and a summary of recurring concepts, question styles and tips drawn from the real
+  past questions.
+- **Exam readiness** — a projected score per subject, weighting each unit by how much of the real
+  exam it makes up, shown with how much of the exam the estimate rests on.
 - **Study notes** — per-topic notes with worked examples and formulas, downloadable as PDF.
 - **Study plan** — a multi-day plan paced to the student's exam date.
 - **Solve an exam question** — type or photograph a question; answers other students already
@@ -38,6 +45,10 @@ weekly study plan, and a daily group practice in Telegram with a leaderboard.
 - Missed it? `/catchup` answers the same questions privately, with instant results. Those
   answers keep the student's streak but don't count toward the score ranking.
 - Students whose streak ends tonight get a private reminder.
+- The day's unit is chosen by how often past exams test it and how badly the group does on it,
+  skipping units used in the last two weeks; the reveal ends with how that unit is tested.
+- Every Sunday each student gets a private summary of their week, with a button into practice on
+  their weakest unit.
 - Leaderboards on the web: the latest practice, this week, and most consistent days.
 - Access is gated by subscription: the bot approves join requests only for subscribers and
   removes lapsed ones daily.
@@ -50,6 +61,13 @@ weekly study plan, and a daily group practice in Telegram with a leaderboard.
   rejects the rest from Telegram. Before subscribing, every account has a small shared
   allowance of free AI actions.
 - Referral codes, with earnings shown on the profile.
+
+**Everywhere**
+- English and Amharic. The web app's navigation, login, sign-up and dashboard and the bot's main
+  menu are translated (switch in Profile, on the login page, or with `/language`); other screens
+  and all exam content stay in English for now.
+- Notes, the study plan, mistakes and progress stay readable offline once opened; practice needs
+  a connection, since answers are graded on the server.
 
 ## How it works
 
@@ -137,7 +155,7 @@ python -m telegram_bot.bot               # run from the repository root
 
 Run a single bot process: login sessions live in one file, which is not safe to share
 between processes. Commands: `/start /login /logout /practice /progress /esslce /explain
-/exam /remind /catchup /status /subscribe /help`.
+/exam /remind /catchup /status /subscribe /help /language`.
 
 ### Loading content
 
@@ -194,7 +212,8 @@ request to `main` and `dev`.
 ## Deployment
 
 The frontend runs on Vercel, the backend and the bot on Railway, and the data on Supabase.
-See [DEPLOY.md](DEPLOY.md). Two things to know: run the backend as a single worker, because
+See [DEPLOY.md](DEPLOY.md), which also covers error reporting (Sentry), an uptime monitor and the
+nightly encrypted database backup (`.github/workflows/backup.yml`). Two things to know: run the backend as a single worker, because
 each worker loads its own copy of the embedding model (about 280MB); and give the bot service
 a volume, or every deploy logs all students out.
 
