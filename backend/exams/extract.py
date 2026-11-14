@@ -289,7 +289,14 @@ def transcribe_answer_page(call, jpg: bytes, pg: int, tries: int = 3) -> tuple[s
     """Returns (markup, problem) - same retry contract as transcribe_page: an empty answer or an exception
     is retried, and a page is never silently lost."""
     problem = ""
-    for _attempt in range(tries):
+    for attempt in range(tries):
+        if attempt > 0:
+            # confirmed live: a page that failed on every one of 3 back-to-back tries re-transcribed
+            # perfectly on its own moments later - a transient blip (rate limit, flaky connection, the
+            # same instability this whole session fought today), not a real problem with the page. A
+            # short gap gives that kind of failure room to clear before the next attempt, instead of
+            # hitting the exact same transient condition three times in a row.
+            time.sleep(3.0)
         try:
             text = (call(jpg, f"This is printed page {pg} of the answer booklet.") or "").strip()
             if text:
@@ -331,6 +338,11 @@ def transcribe_page(call, jpg: bytes, pg: int, tries: int = 3) -> tuple[str, str
     Q+ marker would otherwise vanish without a trace."""
     problem = ""
     for attempt in range(1, tries + 1):
+        if attempt > 1:
+            # same reasoning as transcribe_answer_page's own backoff: a page that fails on every one
+            # of several instant back-to-back tries is far more likely hitting a transient blip than a
+            # real problem with the page's own content - a short gap gives that a chance to clear.
+            time.sleep(3.0)
         try:
             kept, dropped = split_markup(call(jpg, f"This is printed page {pg} of the booklet."))
             if kept:

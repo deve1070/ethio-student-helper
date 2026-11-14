@@ -61,11 +61,23 @@ def retry_after_seconds(message: str) -> float | None:
     return total or None
 
 
+def _is_daily_quota_error(message: str) -> bool:
+    """Groq phrases a per-minute limit as 'requests per minute (RPM)'/'tokens per minute (TPM)' and a
+    daily cap as '...per day (RPD/TPD)' - the per-minute kind clears itself within our own retry
+    window, but a daily cap cannot possibly free up in the next few seconds/minutes no matter how long
+    this call waits. Confirmed live: waiting out a daily cap's own 5-attempt backoff cost ~7.5 minutes
+    on a single question before giving up anyway - failing fast here instead lets the caller (e.g.
+    solve_paper's per-question loop) move on immediately."""
+    return "per day" in message.lower()
+
+
 def invoke_with_retry(model, messages, attempts: int = 5, max_wait: float = 30.0):
     for attempt in range(1, attempts + 1):
         try:
             return model.invoke(messages)
         except RATE_LIMIT_ERRORS as e:
+            if _is_daily_quota_error(str(e)):
+                raise LLMUnavailableError(f"daily rate limit reached, not worth retrying: {e}") from e
             if attempt == attempts:
                 raise LLMUnavailableError(f"rate limit still reached after {attempts} tries: {e}") from e
             wait = min((retry_after_seconds(str(e)) or 2.0 * attempt) + 0.5, max_wait)

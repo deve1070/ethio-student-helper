@@ -8,6 +8,7 @@ account as of 2026-10-21, see the esh-extraction-gemini-vision memory).
 import base64
 
 from config.settings import settings
+from llm.gemini_content import content_to_text as _content_to_text
 
 
 def make_gemini_vision_call(model_id: str, system_prompt: str, max_output_tokens: int = 12000):
@@ -53,8 +54,9 @@ def make_gemini_vision_call(model_id: str, system_prompt: str, max_output_tokens
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpg).decode()}},
         ]
         r = llm.invoke([{"role": "user", "content": content}])
-        blocked = not r.content and r.response_metadata.get("finish_reason") == "RECITATION"
-        return r.content or "", blocked
+        text = _content_to_text(r.content)
+        blocked = not text and r.response_metadata.get("finish_reason") == "RECITATION"
+        return text, blocked
 
     def _split_row(img) -> int:
         """A y-coordinate near the vertical midpoint that falls on a near-blank row, so cropping there is

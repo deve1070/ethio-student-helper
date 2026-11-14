@@ -296,8 +296,24 @@ always_two = FakeLLM(json.dumps({"answer_index": 2, "source_index": 0,
 always_zero = FakeLLM(json.dumps({"answer_index": 0, "source_index": 0,
     "explanation": "different conclusion", "supporting_quote": "Neon is a noble gas"}))
 res = ST.solve_paper(db, sp, always_two, always_zero, tb1, grades=(9,), log=quiet)
-assert res == {"solved": 6, "unresolved": 0, "withdrawn": 1, "auto_approved": 0}       # 7 - 1 manual (never touched); item 3's approval withdrawn
+assert res == {"solved": 6, "unresolved": 0, "withdrawn": 1, "auto_approved": 0, "errored": 0}       # 7 - 1 manual (never touched); item 3's approval withdrawn
 assert sp.questions[1].answer_index == 3 and sp.questions[1].answer_source == "manual"  # untouched - never overwritten
+
+# ---- 6c. one question's primary-call exception (malformed output, exhausted quota, ...) is skipped,
+# never crashes the rest of the paper's questions --------------------------------------------------------
+class FlakyLLM:
+    def __init__(self, bad_stem, content):
+        self.bad_stem, self.content = bad_stem, content
+    def chat(self, messages):
+        if self.bad_stem in messages[0]["content"]:
+            raise RuntimeError("simulated provider failure (e.g. groq.BadRequestError)")
+        return {"choices": [{"message": {"content": self.content}}]}
+
+flaky = FlakyLLM(sp.questions[4].stem, json.dumps({"answer_index": 2, "source_index": 0,
+    "explanation": "matches the passage", "supporting_quote": "Neon is a noble gas"}))
+res = ST.solve_paper(db, sp, flaky, always_zero, tb1, grades=(9,), log=quiet)
+assert res["errored"] == 1, res            # only questions[4] raised
+assert res["solved"] == 5, res             # the other 5 non-manual questions still solved normally
 assert sp.questions[2].answer_index == 2 and sp.questions[2].review_status == "needs_review" and sp.questions[2].reviewed_by is None
 assert sp.questions[2].cross_check_status == "disagreed" and sp.questions[2].cross_check_secondary_answer == 0
 assert sp.questions[0].answer_index == 2 and sp.questions[0].answer_source == "ai_derived" and sp.questions[0].review_status == "needs_review"

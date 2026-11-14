@@ -15,6 +15,7 @@ works unchanged regardless of which client it's given.
 
 from config.settings import settings
 from langchain_google_genai import ChatGoogleGenerativeAI
+from llm.gemini_content import content_to_text
 from llm.retry import invoke_with_retry
 
 
@@ -34,4 +35,4 @@ class GeminiLLMClient:
 
     def chat(self, messages: list[dict]) -> dict:
         response = invoke_with_retry(self.model, messages)
-        return {"choices": [{"message": {"content": response.content}}]}
+        return {"choices": [{"message": {"content": content_to_text(response.content)}}]}

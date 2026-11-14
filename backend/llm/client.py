@@ -70,7 +70,18 @@ class LLMClient:
         temperature: float = 0,
         max_tokens: int = 1500,
         reasoning_effort: str = "low",
+        retry_attempts: int = 5,
+        retry_max_wait: float = 30.0,
     ):
+        # retry_attempts/retry_max_wait: invoke_with_retry's own defaults are right for a call whose
+        # result the user is actually waiting on (an answer, an elaboration) - rate-limit backoff
+        # capped at 30s per try, up to 5 tries, can legitimately add up to ~2 minutes before giving up.
+        # A caller whose result is purely cosmetic (e.g. studyplan/coach.py's rationale text, already
+        # designed to degrade to "no rationale" on ANY failure) should pass a much smaller budget here
+        # instead - the whole point of that degrade-gracefully design is defeated if getting TO the
+        # failure still costs minutes of retrying first.
+        self.retry_attempts = retry_attempts
+        self.retry_max_wait = retry_max_wait
         self.model = ChatGroq(
             model=model_id or settings.GROQ_MODEL,
             api_key=settings.GROQ_API_KEY,
@@ -98,5 +109,7 @@ class LLMClient:
         three call sites needed zero changes beyond how this object is
         constructed.
         """
-        response = invoke_with_retry(self.model, messages)
+        response = invoke_with_retry(
+            self.model, messages, attempts=self.retry_attempts, max_wait=self.retry_max_wait
+        )
         return {"choices": [{"message": {"content": response.content}}]}
