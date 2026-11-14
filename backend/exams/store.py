@@ -1456,19 +1456,98 @@ def eligible_units(db, subject: str) -> list:
 MASS_CHALLENGE_SUBJECTS = sorted(STREAM_PARTITIONED_SUBJECTS)
 
 
-def _pick_unit_from(db, subjects: list[str], day_index: int) -> tuple[str, int | None, str] | None:
-    """Deterministic rotation over one subject list - the subject/unit picked for a given
-    day_index is always the same if called again (no stored rotation-index state needed). Walks
-    the list starting from a day-of-year-derived offset, skipping any subject with zero eligible
-    units right now, then picks a unit from that subject's own eligible list the same way. Returns
-    None only if nothing in `subjects` is eligible at all."""
+UNIT_PICK_RECENT_DAYS = 14  # a unit used for the subject's mass practice this recently is skipped
+UNIT_PICK_ACCURACY_DAYS = 60  # how far back the group's answers count toward a unit's difficulty
+
+
+def rank_units(units: list[dict], accuracy: dict, recent: set) -> list[dict]:
+    """Orders candidate units for a day's mass practice, best first. units: eligible_units() rows
+    ({grade, unit, questions}); accuracy: {(grade, unit): (correct, attempted)} from every student's
+    recent answers; recent: {(grade, unit)} used lately for this subject.
+
+    A unit's score is how often past exams test it (its share of the subject's past questions)
+    times how hard students find it. Difficulty is 1 - (correct + 1) / (attempted + 2): an unpractised
+    unit starts at 0.5, and a handful of answers can only move it part of the way, so a unit is not
+    labelled easy or hard from two answers. Units used recently go last, so the rotation still moves
+    through the subject when every unit is recent. Ties break on the unit name, so the same inputs
+    always give the same pick."""
+    total = sum(u["questions"] for u in units) or 1
+
+    def score(u):
+        correct, attempted = accuracy.get((u["grade"], u["unit"]), (0, 0))
+        difficulty = 1 - (correct + 1) / (attempted + 2)
+        return (u["questions"] / total) * difficulty
+
+    return sorted(units, key=lambda u: ((u["grade"], u["unit"]) in recent, -score(u), u["unit"]))
+
+
+def _group_unit_accuracy(db, subject: str) -> dict:
+    """{(grade, unit): (correct, attempted)} over every student's answers in the last
+    UNIT_PICK_ACCURACY_DAYS days, each question assigned to its best unit."""
+    since = datetime.utcnow() - timedelta(days=UNIT_PICK_ACCURACY_DAYS)
+    answers = (
+        db.query(EsslceAttempt.question_id, EsslceAttempt.is_correct)
+        .join(EsslcePaper, EsslceAttempt.paper_id == EsslcePaper.id)
+        .filter(EsslcePaper.subject == subject, EsslceAttempt.created_at >= since)
+        .all()
+    )
+    if not answers:
+        return {}
+    links = (
+        db.query(
+            EsslceTopicLink.question_id,
+            EsslceTopicLink.grade,
+            EsslceTopicLink.unit,
+            EsslceTopicLink.verified,
+            EsslceTopicLink.score,
+            EsslceTopicLink.rank,
+        )
+        .filter(EsslceTopicLink.question_id.in_({qid for qid, _ in answers}))
+        .all()
+    )
+    by_question: dict = {}
+    for qid, grade, unit, verified, sc, rank in links:
+        by_question.setdefault(qid, []).append(SimpleNamespace(grade=grade, unit=unit, verified=verified, score=sc, rank=rank))
+    best = {}
+    for qid, ls in by_question.items():
+        ls.sort(key=lambda l: (not l.verified, l.score if l.score is not None else 9.0, l.rank))
+        if ls[0].unit:
+            best[qid] = (ls[0].grade, ls[0].unit)
+    out: dict = {}
+    for qid, ok in answers:
+        key = best.get(qid)
+        if key is None:
+            continue
+        correct, attempted = out.get(key, (0, 0))
+        out[key] = (correct + int(ok), attempted + 1)
+    return out
+
+
+def _recent_units(db, subject: str, today) -> set:
+    from exams.models import MassChallenge
+
+    since = today - timedelta(days=UNIT_PICK_RECENT_DAYS)
+    return {
+        (grade, unit)
+        for grade, unit in db.query(MassChallenge.grade, MassChallenge.unit).filter(
+            MassChallenge.subject == subject, MassChallenge.date >= since, MassChallenge.date < today
+        )
+    }
+
+
+def _pick_unit_from(db, subjects: list[str], today) -> tuple[str, int | None, str] | None:
+    """The subject rotates by day of year over `subjects`, skipping any subject with no eligible
+    units, so every subject keeps getting its turn. Within the day's subject the unit is
+    rank_units()'s first choice: tested often, found hard, not used in the last two weeks.
+    Returns None only if nothing in `subjects` is eligible at all."""
+    day_index = today.timetuple().tm_yday
     n = len(subjects)
     for offset in range(n):
         subject = subjects[(day_index + offset) % n]
         units = eligible_units(db, subject)
         if units:
-            unit_entry = units[day_index % len(units)]
-            return subject, unit_entry["grade"], unit_entry["unit"]
+            best = rank_units(units, _group_unit_accuracy(db, subject), _recent_units(db, subject, today))[0]
+            return subject, best["grade"], best["unit"]
     return None
 
 
@@ -1477,7 +1556,7 @@ def pick_todays_unit(db, today) -> tuple[str, int | None, str] | None:
     pick_todays_challenges below for the stream-aware version actually used to build a day's
     MassChallenge row(s); this stays a thin wrapper since it's also the simplest thing to point a
     direct test at."""
-    return _pick_unit_from(db, MASS_CHALLENGE_SUBJECTS, today.timetuple().tm_yday)
+    return _pick_unit_from(db, MASS_CHALLENGE_SUBJECTS, today)
 
 
 def pick_todays_challenges(db, today) -> list[dict]:
@@ -1491,7 +1570,7 @@ def pick_todays_challenges(db, today) -> list[dict]:
     deterministic and reproducible, just over a different, smaller list). Returns an empty list
     only if literally nothing in the whole bank is eligible yet."""
     day_index = today.timetuple().tm_yday
-    main = _pick_unit_from(db, MASS_CHALLENGE_SUBJECTS, day_index)
+    main = _pick_unit_from(db, MASS_CHALLENGE_SUBJECTS, today)
     if main is None:
         return []
     subject, grade, unit = main
@@ -1503,7 +1582,7 @@ def pick_todays_challenges(db, today) -> list[dict]:
 
     other_stream = "social_science" if primary_stream == "natural_science" else "natural_science"
     other_subjects = sorted(SOCIAL_ONLY_SUBJECTS if other_stream == "social_science" else NATURAL_ONLY_SUBJECTS)
-    other = _pick_unit_from(db, other_subjects, day_index)
+    other = _pick_unit_from(db, other_subjects, today)
     if other:
         o_subject, o_grade, o_unit = other
         challenges.append({"stream": other_stream, "subject": o_subject, "grade": o_grade, "unit": o_unit})

@@ -229,5 +229,22 @@ check("a failed send the event moved past is closed", is_closed(1, {0: 300.0, 2:
 check("the last question's failed send closes once its slot has passed", is_closed(5, {4: 300.0}, 90) is True)
 check("...but not while its slot could still come", is_closed(5, {4: 120.0}, 90) is False)
 
+# ---- rank_units: the day's unit is tested often, found hard, and not used recently ------------
+from exams.store import rank_units  # noqa: E402
+
+units = [
+    {"grade": 11, "unit": "Unit A", "questions": 10},
+    {"grade": 11, "unit": "Unit B", "questions": 10},
+    {"grade": 12, "unit": "Unit C", "questions": 2},
+]
+check("no answers yet: the most-tested unit first", rank_units(units, {}, set())[0]["unit"] == "Unit A")
+check("the group's weaker unit wins between equally tested units",
+      rank_units(units, {(11, "Unit A"): (9, 10), (11, "Unit B"): (2, 10)}, set())[0]["unit"] == "Unit B")
+check("a rarely tested unit doesn't win just by being hard",
+      rank_units(units, {(12, "Unit C"): (0, 10)}, set())[0]["unit"] != "Unit C")
+check("a recently used unit goes last", rank_units(units, {}, {(11, "Unit A")})[-1]["unit"] == "Unit A")
+check("all recent: still picks one", rank_units(units, {}, {(11, "Unit A"), (11, "Unit B"), (12, "Unit C")})[0]["unit"] == "Unit A")
+check("two answers can't swing it", rank_units(units[:2], {(11, "Unit A"): (2, 2)}, set())[0]["unit"] == "Unit B")
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
