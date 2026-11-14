@@ -13,6 +13,7 @@ from telegram.ext import (
 )
 
 from telegram_bot import mass_challenge, reminders, weekly_report
+from telegram_bot.i18n import tr
 from telegram_bot import store as bot_store
 from telegram_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_URL
 from telegram_bot.handlers.auth_handler import login_command, login_text_handler, logout_command
@@ -65,6 +66,7 @@ COMMANDS = [
     BotCommand("status", "Check your subscription status"),
     BotCommand("subscribe", "Subscribe for a year of unlimited access"),
     BotCommand("help", "Get help or join our student group"),
+    BotCommand("language", "English or Amharic / ቋንቋ"),
 ]
 
 # The main menu's buttons (start_command below) each just call the exact same function its
@@ -74,11 +76,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Also reachable as the main menu's "Help" button - see api/routes_auth.py's ProfileResponse,
     which surfaces this same TELEGRAM_GROUP_URL on the app's Profile page, for the one shared place
     this link is kept (config/settings.py / this bot's own config.py, both reading the same .env)."""
+    uid = update.effective_user.id
     if TELEGRAM_GROUP_URL:
-        text = f"Need help or have a question? Join our student group:\n{TELEGRAM_GROUP_URL}"
+        text = tr(uid, "Need help or have a question? Join our student group:\n{url}", url=TELEGRAM_GROUP_URL)
     else:
-        text = "Having trouble? Use /login to link your account, or ask your question with /explain."
+        text = tr(uid, "Having trouble? Use /login to link your account, or ask your question with /explain.")
     await update.effective_message.reply_text(text)
+
+
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("English", callback_data="lang|en"), InlineKeyboardButton("አማርኛ", callback_data="lang|am")]]
+    )
+    await update.effective_message.reply_text(tr(update.effective_user.id, "Choose your language:"), reply_markup=keyboard)
+
+
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    lang = query.data.split("|", 1)[1]
+    uid = query.from_user.id
+    bot_store.get_store().set_lang(uid, lang)
+    await query.answer()
+    await query.edit_message_text(
+        tr(uid, "Language set to Amharic." if lang == "am" else "Language set to English."),
+        reply_markup=_main_menu(uid),
+    )
 
 
 _MENU_ACTIONS = {
@@ -93,29 +115,35 @@ _MENU_ACTIONS = {
     "login": login_command,
     "logout": logout_command,
     "help": help_command,
+    "language": language_command,
 }
 
 
-def _main_menu() -> InlineKeyboardMarkup:
+def _main_menu(uid: int) -> InlineKeyboardMarkup:
+    def button(label: str, action: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(tr(uid, label), callback_data=f"m|{action}")
+
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Practice", callback_data="m|practice"), InlineKeyboardButton("📊 Progress", callback_data="m|progress")],
-        [InlineKeyboardButton("🎓 ESSLCE past papers", callback_data="m|esslce")],
-        [InlineKeyboardButton("❓ Ask the textbook", callback_data="m|explain"), InlineKeyboardButton("📷 Exam question", callback_data="m|exam")],
-        [InlineKeyboardButton("⏰ Reminders", callback_data="m|remind")],
-        [InlineKeyboardButton("💳 My status", callback_data="m|status"), InlineKeyboardButton("🛒 Subscribe", callback_data="m|subscribe")],
-        [InlineKeyboardButton("🔐 Login", callback_data="m|login"), InlineKeyboardButton("🚪 Logout", callback_data="m|logout")],
-        [InlineKeyboardButton("🆘 Help", callback_data="m|help")],
+        [button("📝 Practice", "practice"), button("📊 Progress", "progress")],
+        [button("🎓 ESSLCE past papers", "esslce")],
+        [button("❓ Ask the textbook", "explain"), button("📷 Exam question", "exam")],
+        [button("⏰ Reminders", "remind")],
+        [button("💳 My status", "status"), button("🛒 Subscribe", "subscribe")],
+        [button("🔐 Login", "login"), button("🚪 Logout", "logout")],
+        [button("🆘 Help", "help"), button("🌐 Language", "language")],
     ])
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id
     await update.effective_message.reply_text(
-        "Welcome to the Ethiopian Student Helper! Tap a button below, "
-        "or type / to see every command.\n\n"
-        "Tip: run /login once even if you're already logged in on the app - it links this chat to "
-        "your account, which is also what lets you reset your password from the app later if you "
-        "ever forget it.",
-        reply_markup=_main_menu(),
+        tr(
+            uid,
+            "Welcome to the Ethiopian Student Helper! Tap a button below, or type / to see every command.\n\n"
+            "Tip: run /login once even if you're already logged in on the app - it links this chat to your "
+            "account, which is also what lets you reset your password from the app later if you ever forget it.",
+        ),
+        reply_markup=_main_menu(uid),
     )
 
 
@@ -181,6 +209,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("subscribe", subscribe_command))
     app.add_handler(CommandHandler("pending_payments", pending_payments_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("language", language_command))
+    app.add_handler(CallbackQueryHandler(language_callback, pattern=r"^lang\|"))
     app.add_handler(CallbackQueryHandler(payment_review_callback, pattern=r"^PM\|"))
     app.add_handler(MessageHandler(filters.PHOTO, exam_photo_handler))
     # Different group (1, not the default 0): both this and exam_photo_handler above must see

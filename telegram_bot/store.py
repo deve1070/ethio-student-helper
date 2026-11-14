@@ -32,7 +32,7 @@ def token_expired(token: str, now: float | None = None, margin: float = 60.0) ->
 
 
 class Store:
-    SECTIONS = ("sessions", "reminders", "prefs", "active")
+    SECTIONS = ("sessions", "reminders", "prefs", "active", "lang")
 
     def __init__(self, path=None):
         self.path = Path(path) if path else DEFAULT_DIR / "state.json"
@@ -141,6 +141,16 @@ class Store:
     def get_pref(self, uid: int):
         with self._lock:
             return self._data["prefs"].get(str(uid))
+
+    def set_lang(self, uid: int, lang: str) -> None:
+        with self._lock:
+            if self._data["lang"].get(str(uid)) != lang:
+                self._data["lang"][str(uid)] = lang
+                self._save()
+
+    def get_lang(self, uid: int) -> str:
+        with self._lock:
+            return self._data["lang"].get(str(uid), "en")
 
     def mark_active(self, uid: int, day: str) -> None:
         with self._lock:
