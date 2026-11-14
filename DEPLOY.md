@@ -1,8 +1,11 @@
 # Deploying
 
-Frontend on Vercel, backend on Render, all persistent state (Postgres, vector search,
-exam diagram photos, payment receipts) on Supabase's free tier. See
-`docs/dev_plans/deploy_vercel_render_supabase.md` for why this split.
+Frontend on Vercel, backend + Telegram bot on Railway, all persistent state (Postgres,
+vector search, exam diagram photos, payment receipts) on Supabase's free tier. See
+`docs/dev_plans/deploy_vercel_render_supabase.md` for why the data-layer split in
+particular; Railway replaced Render specifically because Render's free tier has no
+way to run the Telegram bot as an always-on background worker (only a web service
+with a public port) - Render's steps are kept below as a backend-only fallback.
 
 ## 1. Supabase (data)
 
@@ -36,29 +39,91 @@ python -m scripts.migrate_vectors_to_pgvector
 python -m scripts.migrate_storage_to_supabase
 ```
 
-## 3. Render (backend)
+## 3. Railway (backend + Telegram bot)
 
-New Web Service → connect the repo → it picks up `render.yaml` at the repo root
-automatically. Fill in the env vars `render.yaml` leaves blank (`sync: false`):
-`DATABASE_URL`, `VECTOR_DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`,
-`GROQ_API_KEY`, `GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN` (optional - only needed for
-the admin payment-review push), and `ALLOWED_ORIGINS` once you have the Vercel URL
-from step 4. `JWT_SECRET_KEY` is generated for you.
+One Railway project, **two services**, both pointed at this same repo - their
+`railway.json` files live at different paths specifically because of how each
+one's Python imports work (see the comment at the top of `bot.py`), not by
+accident:
+
+### 3a. Backend service
+
+- New Service → Deploy from GitHub repo → this repo.
+- Settings → Root Directory: `backend`. It picks up `backend/railway.json`
+  automatically (build: `pip install -r requirements.txt`; start: `uvicorn
+  main:app --host 0.0.0.0 --port $PORT` - deliberately no `--workers` flag, since
+  each worker would load its own separate copy of the ~280MB embedding model).
+  `backend/requirements.txt` is the slim production set (only what the live server
+  imports); the offline ingestion/OCR/extraction tooling lives in
+  `backend/requirements-dev.txt`, which is what to install on a development machine.
+- Settings → Resource limits: set a ceiling (not a reservation - Railway bills
+  actual usage either way) of around 1 vCPU / 1GB RAM. Measured locally, the
+  worker process sits around 330-400MB RSS with the embedding model loaded; 1GB
+  leaves real headroom for request spikes without being wasteful.
+- Variables: `DATABASE_URL`, `VECTOR_DATABASE_URL`, `SUPABASE_URL`,
+  `SUPABASE_SERVICE_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `JWT_SECRET_KEY`
+  (generate a real random value, don't reuse the dev default),
+  `BOT_INTERNAL_TOKEN` (generate one - must match the bot service's value
+  exactly), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_PRIVATE_GROUP_ID`, `ENVIRONMENT=production`,
+  `ALLOWED_ORIGINS` (fill in once you have the Vercel URL from step 4).
+- Generate a public domain for this service (Settings → Networking) - you'll
+  need its URL for both the frontend's `VITE_API_BASE_URL` and the bot's
+  `BACKEND_BASE_URL` below.
+
+### 3b. Telegram bot service
+
+- Same Railway project → New Service → Deploy from GitHub repo → this repo again.
+- Settings → Root Directory: leave as the **repo root** (not `telegram_bot`) -
+  its code imports itself as `from telegram_bot import ...`, which only resolves
+  correctly when the repo root is the working directory. It picks up the
+  repo-root `railway.json` (start: `python bot.py`, a thin wrapper that exists
+  only so Railway's Python auto-detection finds an entry file at the root - see
+  that file's own docstring).
+- **Volume (required):** add a Railway volume to this service, mounted at `/data`,
+  and set `BOT_DATA_DIR=/data`. The bot keeps every student's login session, daily
+  reminder and subject preference in one file (`state.json`, see
+  `telegram_bot/store.py`). A Railway container's own disk is replaced on every
+  deploy, so without the volume each deploy logs every student out and deletes
+  every reminder.
+- Settings → Resource limits: much lighter than the backend - measured locally
+  at ~56MB RSS idle, no embedding model, no torch. 0.5 vCPU / 0.5GB is generous.
+- Variables: `TELEGRAM_BOT_TOKEN`, `BOT_INTERNAL_TOKEN` (same value as the
+  backend's), `TELEGRAM_GROUP_URL`, `TELEGRAM_PRIVATE_GROUP_ID` (same value as
+  the backend's), `MASS_CHALLENGE_TIME`, `MASS_CHALLENGE_HEADSUP_MINUTES`,
+  `MASS_CHALLENGE_NATURAL_TOPIC_ID`, `MASS_CHALLENGE_SOCIAL_TOPIC_ID`, `BOT_DATA_DIR=/data`, and
+  `BACKEND_BASE_URL` = the backend service's public URL from step 3a (Railway's
+  private-networking domain, `<service>.railway.internal`, is a worthwhile
+  latency/egress optimization once the public-URL version is confirmed working
+  - not needed for a first deploy).
 
 ## 4. Vercel (frontend)
 
 New Project → import the repo → set the root directory to `frontend`. Add one env
-var: `VITE_API_BASE_URL` = the Render service's URL from step 3. Deploy.
+var: `VITE_API_BASE_URL` = the backend service's URL from step 3a. Deploy.
 
 ## 5. Close the loop
 
-Back in Render, set `ALLOWED_ORIGINS` to the Vercel URL from step 4 (comma-separated
-if there's more than one, e.g. a preview + production domain) and redeploy - CORS
-needs the real frontend origin to let it through.
+Back in the Railway backend service, set `ALLOWED_ORIGINS` to the Vercel URL from
+step 4 (comma-separated if there's more than one, e.g. a preview + production
+domain) and redeploy - CORS needs the real frontend origin to let it through.
 
 ## Verifying it worked
 
-- `GET <render-url>/health` → `{"status": "ok"}`
+- `GET <railway-backend-url>/health` → `{"status": "ok"}`
 - Sign up through the Vercel URL, ask `/v1/explain` a question - confirms Postgres,
   pgvector, and the LLM keys are all wired correctly.
 - Open an ESSLCE question that has a diagram - confirms Supabase Storage.
+- `/start` the bot on Telegram, `/login` - confirms the bot service is up and can
+  reach the backend.
+
+## Alternative: Render (backend only, no bot worker)
+
+Kept for reference - Render's free tier can't run the bot as an always-on worker,
+only a web service with a public port, so this path leaves the bot undeployed.
+
+New Web Service → connect the repo → it picks up `render.yaml` at the repo root
+automatically. Fill in the env vars `render.yaml` leaves blank (`sync: false`):
+`DATABASE_URL`, `VECTOR_DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`,
+`GROQ_API_KEY`, `GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `BOT_INTERNAL_TOKEN`,
+`TELEGRAM_PRIVATE_GROUP_ID`, and `ALLOWED_ORIGINS` once you have the Vercel URL.
+`JWT_SECRET_KEY` is generated for you.

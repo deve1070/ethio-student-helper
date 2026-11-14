@@ -17,6 +17,9 @@ cp .env.example .env   # fill in GROQ_API_KEY, GEMINI_API_KEY, DATABASE_URL, etc
 uvicorn main:app --reload
 ```
 
+`requirements.txt` is the slim set the server itself needs. Ingestion, OCR and exam
+extraction need the full set instead: `pip install -r requirements-dev.txt`.
+
 Textbook ingestion (once you have MoE PDFs under `backend/content/moe_textbooks/grade_<N>/<subject>/`):
 ```
 python -m ingestion.textbook_ingest

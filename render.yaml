@@ -29,6 +29,10 @@ services:
         sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
+      - key: BOT_INTERNAL_TOKEN
+        generateValue: true
+      - key: TELEGRAM_PRIVATE_GROUP_ID
+        sync: false
       - key: SENTRY_DSN
         sync: false
     healthCheckPath: /health

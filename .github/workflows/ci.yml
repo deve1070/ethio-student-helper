@@ -18,7 +18,9 @@ jobs:
         with:
           python-version: "3.11.9"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # the full set: several tests exercise the offline ingestion/extraction tooling, which the
+        # slim production requirements.txt deliberately leaves out
+        run: pip install -r requirements-dev.txt
       - name: Run backend tests
         # Each test/test_*.py is a standalone script (not pytest - see
         # test_esslce_route.py's docstring) that provisions its own in-memory
