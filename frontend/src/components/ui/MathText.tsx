@@ -5,7 +5,15 @@ import katex from "katex"
 // (weaker, PNG-based) rendering - \[...\] and \(...\) listed first so a doubled $$ is consumed as one
 // block, not matched as two separate single-$ spans. Bare $...$ excludes newlines, same reasoning as the
 // backend: it's the most ambiguous delimiter, so it shouldn't be allowed to span a paragraph break.
-const MATH = /\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)|\$\$([\s\S]*?)\$\$|\$([^$\n]*?)\$/g
+//
+// A bare \begin{aligned}...\end{aligned} (or \begin{align}...\end{align}) with NO \[ \]/$$ $$ wrapper is
+// matched first and separately: every exams/store.py prompt now explicitly tells the model never to emit
+// one of these unwrapped (confirmed live - a student-facing explanation came back as a whole raw
+// \begin{aligned} block with no delimiters at all, which this regex's other four alternatives can't match,
+// so the ENTIRE reply fell through as literal text instead of rendering). This is a safety net for
+// whatever the prompt instruction doesn't catch, not a replacement for it - the \1 backreference requires
+// \end{} to name the SAME environment \begin{} opened.
+const MATH = /\\begin\{(aligned|align)\}([\s\S]*?)\\end\{\1\}|\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)|\$\$([\s\S]*?)\$\$|\$([^$\n]*?)\$/g
 // Same bold handling as RichText.tsx, reused here so a math-bearing string doesn't lose it.
 const BOLD = /\*\*(.+?)\*\*/g
 
@@ -58,9 +66,10 @@ export function MathText({ text, className }: { text: string; className?: string
     let m: RegExpExecArray | null
     while ((m = MATH.exec(text))) {
       if (m.index > last) parts.push(...plainSegments(text.slice(last, m.index), `t${i++}`))
-      const [, block1, inline1, block2, inline2] = m
-      const latex = block1 ?? inline1 ?? block2 ?? inline2 ?? ""
-      const displayMode = block1 !== undefined || block2 !== undefined
+      const [, envName, envContent, block1, inline1, block2, inline2] = m
+      const latex =
+        envContent !== undefined ? `\\begin{${envName}}${envContent}\\end{${envName}}` : block1 ?? inline1 ?? block2 ?? inline2 ?? ""
+      const displayMode = envContent !== undefined || block1 !== undefined || block2 !== undefined
       const html = { __html: renderMath(latex, displayMode) }
       parts.push(
         displayMode ? (

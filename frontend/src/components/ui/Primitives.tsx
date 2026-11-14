@@ -1,6 +1,6 @@
-import type { HTMLAttributes, InputHTMLAttributes, LabelHTMLAttributes } from "react"
+import { useState, type HTMLAttributes, type InputHTMLAttributes, type LabelHTMLAttributes } from "react"
 import clsx from "clsx"
-import { Loader2, type LucideIcon } from "lucide-react"
+import { Eye, EyeOff, Loader2, type LucideIcon } from "lucide-react"
 
 export function Spinner({ className }: { className?: string }) {
   return <Loader2 className={clsx("size-5 animate-spin text-brand-600", className)} aria-label="Loading" />
@@ -46,6 +46,28 @@ export function TextInput({ className, ...rest }: InputHTMLAttributes<HTMLInputE
       )}
       {...rest}
     />
+  )
+}
+
+// A password field with a show/hide toggle - wraps TextInput rather than duplicating its
+// styling, so the two never drift out of sync. The toggle is type="button" (never submits the
+// surrounding form) and tabIndex={-1} (tabs straight from the field to the next one, not through
+// the icon).
+export function PasswordInput({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+  const [visible, setVisible] = useState(false)
+  return (
+    <div className="relative">
+      <TextInput type={visible ? "text" : "password"} className={clsx("pr-11", className)} {...rest} />
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={() => setVisible((v) => !v)}
+        aria-label={visible ? "Hide password" : "Show password"}
+        className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-zinc-400 hover:text-zinc-600"
+      >
+        {visible ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+      </button>
+    </div>
   )
 }
 

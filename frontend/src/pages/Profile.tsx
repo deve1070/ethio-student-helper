@@ -1,8 +1,11 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { Atom, Calendar, Check, Clock, Copy, Landmark, LifeBuoy, LogOut, Pencil, Users, User } from "lucide-react"
+import { Atom, Bot, Calendar, Check, Clock, Copy, Landmark, LogOut, Pencil, Users, User } from "lucide-react"
 import { Button } from "../components/ui/Button"
 import { Card } from "../components/ui/Card"
+import { InstallAppCard } from "../components/ui/InstallAppCard"
+import { TelegramIcon } from "../components/ui/icons/TelegramIcon"
+import { Badge } from "../components/ui/Primitives"
 import { useAuth } from "../lib/auth"
 
 function daysUntil(dateStr: string): number {
@@ -118,14 +121,17 @@ export function ProfilePage() {
       </Card>
 
       {fullProfile?.referral_code && (
-        <Card className="flex flex-col gap-3 p-4">
-          <div className="flex items-center gap-2">
-            <Users className="size-4 text-brand-600" aria-hidden />
-            <p className="text-sm font-semibold text-zinc-900">Invite friends</p>
+        <Card className="flex flex-col gap-3 border-brand-200 bg-gradient-to-br from-brand-50 to-white p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="size-4 text-brand-600" aria-hidden />
+              <p className="text-sm font-semibold text-zinc-900">Refer & earn</p>
+            </div>
+            <Badge tone="brand">50 ETB / friend</Badge>
           </div>
           <p className="text-sm text-zinc-600">
-            Share your code. When a friend signs up with it and becomes a paying student, it counts
-            toward your referrals.
+            Share your code. When a friend signs up with it and becomes a paying student, you earn
+            50 ETB.
           </p>
           <button
             onClick={copyReferralCode}
@@ -140,29 +146,80 @@ export function ProfilePage() {
               <Copy className="size-4 text-zinc-400" aria-hidden />
             )}
           </button>
-          <p className="text-sm text-zinc-500">
-            {fullProfile.referral_paid_count === 0
-              ? "No paid referrals yet."
-              : `${fullProfile.referral_paid_count} student${fullProfile.referral_paid_count === 1 ? "" : "s"} you referred ${fullProfile.referral_paid_count === 1 ? "is" : "are"} now paying students.`}
+          <div className="flex items-center justify-between rounded-lg bg-white px-3 py-2.5 ring-1 ring-brand-100">
+            <div>
+              <p className="text-xs text-zinc-500">You've earned</p>
+              <p className="text-lg font-bold text-brand-700">
+                {fullProfile.referral_earnings_etb.toLocaleString()} ETB
+              </p>
+            </div>
+            <p className="max-w-[55%] text-right text-xs text-zinc-500">
+              {fullProfile.referral_paid_count === 0
+                ? "No paid referrals yet."
+                : `${fullProfile.referral_paid_count} paying student${fullProfile.referral_paid_count === 1 ? "" : "s"} referred`}
+            </p>
+          </div>
+          <p className="text-xs text-zinc-400">
+            Payout is sent manually via Telebirr after admin review - contact support if a referral
+            is missing.
           </p>
         </Card>
       )}
 
-      {fullProfile?.telegram_group_url && (
+      <InstallAppCard />
+
+      {fullProfile?.telegram_bot_url && (
         <Card className="flex flex-col gap-2 p-4">
           <div className="flex items-center gap-2">
-            <LifeBuoy className="size-4 text-brand-600" aria-hidden />
-            <p className="text-sm font-semibold text-zinc-900">Help & Support</p>
+            <Bot className="size-4 text-brand-600" aria-hidden />
+            <p className="text-sm font-semibold text-zinc-900">Telegram account</p>
           </div>
-          <p className="text-sm text-zinc-600">Join our Telegram group for help, updates, and to ask questions.</p>
-          <a
-            href={fullProfile.telegram_group_url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-sm font-medium text-brand-700 hover:underline"
-          >
-            Open Telegram group
-          </a>
+          {fullProfile.telegram_linked ? (
+            <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+              <Check className="size-4" aria-hidden /> Connected - password reset via Telegram is available.
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-zinc-600">
+                Connect your Telegram account to practice from the bot and enable password reset. Open the bot
+                below and tap Login (or send:)
+              </p>
+              <p className="rounded-lg bg-zinc-100 px-3 py-2 font-mono text-xs text-zinc-800">
+                /login {fullProfile.email || fullProfile.phone_number || "<phone or email>"} &lt;your password&gt;
+              </p>
+              <a
+                href={fullProfile.telegram_bot_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm font-medium text-brand-700 hover:underline"
+              >
+                Open @esh_bot on Telegram
+              </a>
+            </>
+          )}
+        </Card>
+      )}
+
+      {fullProfile?.telegram_group_url && (
+        <Card className="flex items-center gap-4 p-4">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#29A9EB]">
+            <TelegramIcon className="size-5 text-white" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-zinc-900">Join the student community</p>
+            <p className="mt-0.5 text-sm text-zinc-600">
+              Discuss exam questions, compare notes, and get help from other students preparing for
+              the same ESSLCE.
+            </p>
+            <a
+              href={fullProfile.telegram_group_url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-brand-700 hover:underline"
+            >
+              Join the group →
+            </a>
+          </div>
         </Card>
       )}
 

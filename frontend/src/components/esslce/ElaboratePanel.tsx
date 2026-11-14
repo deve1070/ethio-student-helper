@@ -3,12 +3,13 @@ import { BookMarked, Lightbulb } from "lucide-react"
 import { Button } from "../ui/Button"
 import { Card } from "../ui/Card"
 import { MathText } from "../ui/MathText"
+import { SubscribeCta } from "../payments/SubscribeCta"
 import { Spinner } from "../ui/Primitives"
-import { errorMessage, esslce, type EsslceElaboration } from "../../lib/api"
+import { errorMessage, esslce, isPaywallError, type EsslceElaboration } from "../../lib/api"
 import { useDelayedStatus } from "../../lib/useDelayedStatus"
 
 export function ElaboratePanel({ questionId }: { questionId: number }) {
-  const [state, setState] = useState<"idle" | "loading" | "error" | "done">("idle")
+  const [state, setState] = useState<"idle" | "loading" | "error" | "paywall" | "done">("idle")
   const [data, setData] = useState<EsslceElaboration | null>(null)
   const [error, setError] = useState("")
   const loadingLabel = useDelayedStatus(state === "loading", "Working it out...", "Still working on it...")
@@ -20,8 +21,13 @@ export function ElaboratePanel({ questionId }: { questionId: number }) {
       setData(res)
       setState("done")
     } catch (e) {
-      setError(errorMessage(e))
-      setState("error")
+      if (isPaywallError(e)) {
+        setError(errorMessage(e))
+        setState("paywall")
+      } else {
+        setError(errorMessage(e))
+        setState("error")
+      }
     }
   }
 
@@ -44,6 +50,7 @@ export function ElaboratePanel({ questionId }: { questionId: number }) {
         </div>
       )}
       {state === "error" && <p className="text-sm text-red-600">{error}</p>}
+      {state === "paywall" && <SubscribeCta message={error} />}
       {state === "done" && data && (
         <>
           <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-700">

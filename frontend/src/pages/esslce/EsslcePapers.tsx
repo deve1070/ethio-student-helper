@@ -48,7 +48,7 @@ export function EsslcePapersPage() {
               key={p.id}
               className="flex items-center justify-between p-4"
               onClick={() =>
-                navigate(`/esslce/${encodeURIComponent(subject)}/session?mode=exam&paperId=${p.id}`)
+                navigate(`/esslce/${encodeURIComponent(subject)}/start?paperId=${p.id}`)
               }
             >
               <div>

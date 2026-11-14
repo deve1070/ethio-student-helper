@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { GraduationCap } from "lucide-react"
 import { Button } from "../../components/ui/Button"
-import { Field, TextInput, ErrorBanner } from "../../components/ui/Primitives"
+import { Field, PasswordInput, TextInput, ErrorBanner } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
 import { errorMessage } from "../../lib/api"
 
@@ -69,9 +69,8 @@ export function SignupPage() {
             />
           </Field>
           <Field label="Password" htmlFor="password">
-            <TextInput
+            <PasswordInput
               id="password"
-              type="password"
               autoComplete="new-password"
               minLength={8}
               value={password}

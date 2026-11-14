@@ -4,10 +4,11 @@ import { ArrowLeft, BookMarked, Download, Lightbulb } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
 import { MathText } from "../../components/ui/MathText"
+import { SubscribeCta } from "../../components/payments/SubscribeCta"
 import { ErrorBanner, Spinner } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
 import { downloadElementAsPdf } from "../../lib/pdf"
-import { errorMessage, notes, type StudyNote, type StudyNoteSection } from "../../lib/api"
+import { errorMessage, isPaywallError, notes, type StudyNote, type StudyNoteSection } from "../../lib/api"
 
 function citationLine(citation: StudyNoteSection["citation"]): string | null {
   if (!citation) return null
@@ -68,24 +69,34 @@ export function NotesDetailPage() {
   const [note, setNote] = useState<StudyNote | null>(null)
   const [stage, setStage] = useState("Getting your notes ready...")
   const [error, setError] = useState<string | null>(null)
+  const [paywallMessage, setPaywallMessage] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
   const printRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setNote(null)
     setError(null)
+    setPaywallMessage(null)
     setStage("Getting your notes ready...")
     notes
       .note(gradeLevel, subject, unit, setStage)
       .then(setNote)
-      .catch((e) => setError(errorMessage(e)))
+      .catch((e) => {
+        if (isPaywallError(e)) setPaywallMessage(errorMessage(e))
+        else setError(errorMessage(e))
+      })
   }, [gradeLevel, subject, unit])
 
   async function downloadPdf() {
     if (!printRef.current) return
     setDownloading(true)
+    setError(null)
     try {
       await downloadElementAsPdf(printRef.current, `${subject}-${unit}.pdf`.replace(/\s+/g, "_"))
+    } catch (e) {
+      // Not a network call - errorMessage's ApiError handling doesn't apply, and its fallback
+      // ("Couldn't reach the server") would be actively misleading for a client-side PDF failure.
+      setError(e instanceof Error ? e.message : "Couldn't generate the PDF. Please try again.")
     } finally {
       setDownloading(false)
     }
@@ -102,7 +113,8 @@ export function NotesDetailPage() {
       <h2 className="-mt-2 text-xl font-semibold text-zinc-900">{unit}</h2>
 
       {error && <ErrorBanner message={error} />}
-      {!note && !error && (
+      {paywallMessage && <SubscribeCta message={paywallMessage} />}
+      {!note && !error && !paywallMessage && (
         <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-sm text-zinc-500">
           <Spinner />
           {stage}

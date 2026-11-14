@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { GraduationCap } from "lucide-react"
 import { Button } from "../../components/ui/Button"
-import { Field, TextInput, ErrorBanner } from "../../components/ui/Primitives"
+import { Field, PasswordInput, TextInput, ErrorBanner } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
 import { auth as authApi, errorMessage } from "../../lib/api"
 
@@ -131,9 +131,8 @@ export function ForgotPasswordPage() {
               />
             </Field>
             <Field label="New password" htmlFor="newPassword">
-              <TextInput
+              <PasswordInput
                 id="newPassword"
-                type="password"
                 autoComplete="new-password"
                 minLength={8}
                 value={newPassword}

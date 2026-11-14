@@ -10,7 +10,6 @@ import { ElaboratePanel } from "../../components/esslce/ElaboratePanel"
 import { AskChatPanel } from "../../components/esslce/AskChatPanel"
 import { ReadingPassage } from "../../components/esslce/ReadingPassage"
 import { MathText } from "../../components/ui/MathText"
-import { RichText } from "../../components/ui/RichText"
 import { errorMessage, esslce, type EsslceAnswer, type EsslceMode, type EsslceQuestion } from "../../lib/api"
 import type { ExamResultItem } from "./EsslceSummary"
 
@@ -183,6 +182,11 @@ export function EsslceSessionPage() {
                 {flagged.has(index) ? "Marked for review" : "Mark for review"}
               </button>
             )}
+            {current.section && (
+              <p className="rounded-lg bg-amber-50 p-3 text-sm leading-relaxed text-amber-900">
+                <MathText text={current.section} />
+              </p>
+            )}
             {current.passage_text && (
               <ReadingPassage title={current.passage_title} text={current.passage_text} />
             )}
@@ -198,7 +202,7 @@ export function EsslceSessionPage() {
             </p>
             <p className="text-[17px] leading-relaxed text-zinc-900">
               <span className="mr-1.5 text-zinc-400">{current.item_no}.</span>
-              <RichText text={current.stem} />
+              <MathText text={current.stem} />
             </p>
           </Card>
 

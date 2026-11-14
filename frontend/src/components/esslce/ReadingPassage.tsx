@@ -1,4 +1,4 @@
-import { RichText } from "../ui/RichText"
+import { MathText } from "../ui/MathText"
 
 // Stored as "(1) first paragraph\n\n(2) second paragraph\n\n..." (exams/store.py's load_paper) - the
 // paragraph number is already in the text, but a plain <p> collapses the blank line between paragraphs
@@ -10,7 +10,7 @@ export function ReadingPassage({ title, text }: { title?: string | null; text: s
       {title && <p className="text-sm font-semibold text-zinc-700">{title}</p>}
       {paragraphs.map((para, i) => (
         <p key={i} className="text-sm leading-relaxed text-zinc-600">
-          <RichText text={para} />
+          <MathText text={para} />
         </p>
       ))}
     </div>

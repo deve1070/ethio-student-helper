@@ -10,7 +10,7 @@
 // an HTTP 200 by the time a mid-pipeline failure (an unavailable LLM, an ungroundable topic) can
 // happen, so those failures travel as that last event's "error" field, not an HTTP error status.
 
-import { ApiError, getToken } from "./api"
+import { ApiError, StreamError, getToken } from "./api"
 
 export interface StreamEvent {
   stage?: string
@@ -67,7 +67,7 @@ async function streamRequest(
     throw new ApiError(res.status, detail)
   }
   const final = await readSseStream(res, onEvent)
-  if (final.error) throw new Error(final.error)
+  if (final.error) throw new StreamError(final.error)
   return final
 }
 

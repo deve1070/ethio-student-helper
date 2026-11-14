@@ -1,6 +1,6 @@
 import clsx from "clsx"
 import { Check, X } from "lucide-react"
-import { RichText } from "../ui/RichText"
+import { MathText } from "../ui/MathText"
 
 const LETTERS = ["A", "B", "C", "D"]
 
@@ -70,7 +70,7 @@ export function OptionList({
               {isCorrect ? <Check className="size-4" /> : isWrongChoice ? <X className="size-4" /> : LETTERS[i]}
             </span>
             <span className="flex-1 text-zinc-900">
-              <RichText text={option} />
+              <MathText text={option} />
             </span>
           </button>
         )

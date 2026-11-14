@@ -23,9 +23,24 @@ function friendlyDetail(detail: unknown): string {
   return "Something went wrong. Please try again."
 }
 
+// A stream (explain/notes) that already committed to an HTTP 200 reports a mid-pipeline failure
+// as its final SSE event's "error" field, not an HTTP error status (lib/sse.ts's readSseStream)
+// - that's a specific, real reason from the backend, not a network problem, so it's kept distinct
+// from a genuine fetch failure (which throws a plain, generic Error) rather than being swallowed
+// into the same "couldn't reach the server" fallback below.
+export class StreamError extends Error {}
+
 export function errorMessage(e: unknown): string {
   if (e instanceof ApiError) return friendlyDetail(e.detail)
+  if (e instanceof StreamError) return e.message
   return "Couldn't reach the server. Check your connection and try again."
+}
+
+// A gated AI feature (explain/notes/elaborate/ask/exam-solve) answers "out of free actions,
+// not subscribed" with HTTP 402 - callers use this to show a Subscribe CTA instead of a plain
+// error banner. friendlyDetail() above still extracts a sensible message either way.
+export function isPaywallError(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 402
 }
 
 let token: string | null = localStorage.getItem("esh_token")

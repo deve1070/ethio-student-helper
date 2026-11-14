@@ -3,8 +3,9 @@ import { MessageCircle, Send } from "lucide-react"
 import { Button } from "../ui/Button"
 import { Card } from "../ui/Card"
 import { MathText } from "../ui/MathText"
+import { SubscribeCta } from "../payments/SubscribeCta"
 import { Spinner } from "../ui/Primitives"
-import { errorMessage, esslce } from "../../lib/api"
+import { errorMessage, esslce, isPaywallError } from "../../lib/api"
 import { useDelayedStatus } from "../../lib/useDelayedStatus"
 
 interface Message {
@@ -18,6 +19,7 @@ export function AskChatPanel({ questionId }: { questionId: number }) {
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
+  const [paywallMessage, setPaywallMessage] = useState("")
   const thinkingLabel = useDelayedStatus(sending, "Thinking...", "Still working on it...")
 
   async function send() {
@@ -25,6 +27,7 @@ export function AskChatPanel({ questionId }: { questionId: number }) {
     if (!text) return
     setDraft("")
     setError("")
+    setPaywallMessage("")
     const nextMessages = [...messages, { role: "user" as const, content: text }]
     setMessages(nextMessages)
     setSending(true)
@@ -33,7 +36,8 @@ export function AskChatPanel({ questionId }: { questionId: number }) {
       const res = await esslce.ask(questionId, text, history)
       setMessages((m) => [...m, { role: "assistant", content: res.reply }])
     } catch (e) {
-      setError(errorMessage(e))
+      if (isPaywallError(e)) setPaywallMessage(errorMessage(e))
+      else setError(errorMessage(e))
     } finally {
       setSending(false)
     }
@@ -77,6 +81,7 @@ export function AskChatPanel({ questionId }: { questionId: number }) {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {paywallMessage && <SubscribeCta message={paywallMessage} />}
 
       <form
         onSubmit={(e) => {

@@ -142,13 +142,18 @@ export function MistakesPage() {
               ))}
               {(source === "esslce" ? (esslceMistakes ?? []) : []).map((m) => (
                 <Card key={m.question_id} className="flex flex-col gap-3 p-4">
+                  {m.section && (
+                    <p className="rounded-lg bg-amber-50 p-3 text-sm leading-relaxed text-amber-900">
+                      <RichText text={m.section} />
+                    </p>
+                  )}
                   {m.passage_text && <ReadingPassage title={m.passage_title} text={m.passage_text} />}
                   <p className="text-xs font-medium text-zinc-400">
                     {m.year_ec} E.C.{m.booklet_code ? ` · Booklet ${m.booklet_code}` : ""}
                   </p>
                   <p className="text-[15px] leading-relaxed text-zinc-900">
                     <span className="mr-1.5 text-zinc-400">{m.item_no}.</span>
-                    <RichText text={m.stem} />
+                    <MathText text={m.stem} />
                   </p>
                   <OptionList options={m.options} selected={m.chosen_index} correctIndex={m.correct_index} onSelect={() => {}} disabled />
                   {m.explanation && (

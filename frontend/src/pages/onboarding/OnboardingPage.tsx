@@ -1,13 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Atom, Check, Landmark, Sparkles } from "lucide-react"
+import {
+  Atom,
+  BookOpenCheck,
+  BookText,
+  Calendar,
+  Check,
+  GraduationCap,
+  Landmark,
+  MessageCircleQuestion,
+  Sparkles,
+} from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Card, CardButton } from "../../components/ui/Card"
 import { ErrorBanner, FullPageSpinner } from "../../components/ui/Primitives"
+import { TelegramIcon } from "../../components/ui/icons/TelegramIcon"
 import { useAuth } from "../../lib/auth"
 import { auth, errorMessage, type StreamSubjects } from "../../lib/api"
 
-type Step = "stream" | "subjects" | "examDate" | "goal" | "done"
+type Step = "welcome" | "stream" | "subjects" | "examDate" | "goal" | "done"
+
+// Same icon/color idiom as Dashboard.tsx's own feature tiles - kept as a local constant since
+// this is the only other place that lists all of the app's features together.
+const FEATURES = [
+  { icon: MessageCircleQuestion, title: "Ask a question", description: "Grounded answers from your own textbooks.", color: "bg-brand-600" },
+  { icon: BookOpenCheck, title: "Practice", description: "Multiple-choice questions by subject and unit.", color: "bg-accent-500" },
+  { icon: GraduationCap, title: "ESSLCE exam bank", description: "Grade 12 past papers, mock exams, diagnostics.", color: "bg-zinc-800" },
+  { icon: BookText, title: "Study notes", description: "Topic summaries and worked examples from your textbooks.", color: "bg-emerald-600" },
+  { icon: Calendar, title: "Study plan", description: "A daily plan built around your exam date.", color: "bg-amber-500" },
+  { icon: TelegramIcon, title: "Student community", description: "Join other students on Telegram.", color: "bg-[#29A9EB]" },
+]
 
 const GOAL_OPTIONS = [
   { minutes: 30, label: "30 minutes", description: "Good for busy schedules" },
@@ -21,7 +43,7 @@ export function OnboardingPage() {
   const navigate = useNavigate()
 
   const steps = useMemo<Step[]>(() => {
-    const s: Step[] = []
+    const s: Step[] = ["welcome"]
     if (gradeLevel >= 11) s.push("stream")
     s.push("subjects")
     if (gradeLevel === 12) s.push("examDate")
@@ -118,6 +140,36 @@ export function OnboardingPage() {
       </div>
 
       {error && <ErrorBanner message={error} />}
+
+      {step === "welcome" && (
+        <div className="flex flex-col gap-5">
+          <div>
+            <h1 className="text-xl font-semibold text-zinc-900">Welcome to Ethiopian Student Helper</h1>
+            <p className="mt-1 text-sm text-zinc-500">
+              Everything you need to prepare for your exams, in one place.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3">
+            {FEATURES.map((f) => (
+              <div key={f.title} className="flex items-center gap-4">
+                <div className={"flex size-11 shrink-0 items-center justify-center rounded-xl " + f.color}>
+                  <f.icon className="size-5 text-white" aria-hidden />
+                </div>
+                <div>
+                  <p className="font-medium text-zinc-900">{f.title}</p>
+                  <p className="text-sm text-zinc-500">{f.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Deliberately a bare goNext(), not saveAndNext/updateMe - a student who only ever sees
+              this screen and closes the app should not be recorded as having completed onboarding
+              (api/routes_auth.py's update_me marks onboarding_completed_at on its first call). */}
+          <Button fullWidth onClick={goNext}>
+            Get Started
+          </Button>
+        </div>
+      )}
 
       {step === "stream" && (
         <div className="flex flex-col gap-5">

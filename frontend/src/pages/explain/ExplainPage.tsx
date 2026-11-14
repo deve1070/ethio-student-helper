@@ -2,9 +2,10 @@ import { useEffect, useState } from "react"
 import { BookMarked, Send } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
+import { SubscribeCta } from "../../components/payments/SubscribeCta"
 import { ErrorBanner, Field, Spinner, TextInput } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
-import { errorMessage, explain, practice, type Citation } from "../../lib/api"
+import { errorMessage, explain, isPaywallError, practice, type Citation } from "../../lib/api"
 
 const GRADES = [9, 10, 11, 12]
 
@@ -16,6 +17,7 @@ export function ExplainPage() {
   const [loading, setLoading] = useState(false)
   const [stage, setStage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [paywallMessage, setPaywallMessage] = useState<string | null>(null)
   const [result, setResult] = useState<{ answer: string; citations: Citation[] } | null>(null)
 
   useEffect(() => {
@@ -28,6 +30,7 @@ export function ExplainPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    setPaywallMessage(null)
     setResult(null)
     setStage("Finding the answer in your textbooks...")
     setLoading(true)
@@ -35,7 +38,8 @@ export function ExplainPage() {
       const res = await explain.ask(gradeLevel, subject, question, setStage)
       setResult(res)
     } catch (err) {
-      setError(errorMessage(err))
+      if (isPaywallError(err)) setPaywallMessage(errorMessage(err))
+      else setError(errorMessage(err))
     } finally {
       setLoading(false)
       setStage(null)
@@ -44,6 +48,8 @@ export function ExplainPage() {
 
   return (
     <div className="flex flex-col gap-5">
+      {paywallMessage && <SubscribeCta message={paywallMessage} />}
+
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         {error && <ErrorBanner message={error} />}
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { BookOpenCheck, BookText, Calendar, GraduationCap, MessageCircleQuestion, Sparkles } from "lucide-react"
 import { Card, CardButton } from "../components/ui/Card"
+import { InstallAppCard } from "../components/ui/InstallAppCard"
 import { Spinner } from "../components/ui/Primitives"
 import { StudyPlanTaskRow } from "../components/ui/StudyPlanTaskRow"
 import { useAuth } from "../lib/auth"
@@ -17,6 +18,13 @@ export function DashboardPage() {
   const navigate = useNavigate()
   const { gradeLevel, fullProfile } = useAuth()
   const [week, setWeek] = useState<StudyPlanResponse | null | undefined>(undefined)
+  const [installDismissed, setInstallDismissed] = useState(() => {
+    try {
+      return localStorage.getItem("esh_install_dismissed") === "1"
+    } catch {
+      return false // storage can throw (private browsing, blocked cookies) - just show the banner
+    }
+  })
 
   useEffect(() => {
     studyPlan
@@ -87,6 +95,19 @@ export function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {!installDismissed && (
+        <InstallAppCard
+          onDismiss={() => {
+            setInstallDismissed(true)
+            try {
+              localStorage.setItem("esh_install_dismissed", "1")
+            } catch {
+              // best-effort only - worst case the banner reappears next visit
+            }
+          }}
+        />
+      )}
+
       {fullProfile?.exam_date && (
         <div className="flex items-center gap-4 rounded-2xl bg-brand-600 p-4 text-white shadow-[var(--shadow-card)]">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white/15">
