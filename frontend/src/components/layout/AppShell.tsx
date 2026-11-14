@@ -4,6 +4,7 @@ import clsx from "clsx"
 import { FullPageSpinner } from "../ui/Primitives"
 import { BarChart3, BookOpenCheck, GraduationCap, Home, Trophy, User, Wallet } from "lucide-react"
 import { useI18n } from "../../lib/i18n"
+import { useOnline } from "../../lib/useOnline"
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -36,6 +37,7 @@ function currentTitle(pathname: string): string {
 export function AppShell() {
   const location = useLocation()
   const { t } = useI18n()
+  const online = useOnline()
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-xl flex-col bg-[#f7f8f7]">
@@ -45,6 +47,12 @@ export function AppShell() {
       >
         <h1 className="text-[17px] font-semibold text-zinc-900">{t(currentTitle(location.pathname))}</h1>
       </header>
+
+      {!online && (
+        <p className="bg-amber-50 px-4 py-2 text-center text-xs text-amber-800">
+          {t("You're offline. Notes and plans you've opened are still here; practice needs a connection.")}
+        </p>
+      )}
 
       <main className="flex-1 overflow-y-auto px-4 py-5">
         <Suspense fallback={<FullPageSpinner />}>

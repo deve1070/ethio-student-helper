@@ -31,6 +31,12 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 const GRADE_KEY = "esh_grade"
 
+// Pages saved for offline reading (vite.config.ts runtimeCaching) belong to whoever was logged in;
+// drop them so the next person on this device can't open them.
+function clearOfflineCache() {
+  if (typeof caches !== "undefined") caches.delete("esh-api").catch(() => {})
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<LocalProfile | null>(() => {
     const userId = localStorage.getItem("esh_user_id")
@@ -41,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
+      clearOfflineCache()
       setProfile(null)
       setFullProfile(null)
     })
@@ -94,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       logout: () => {
         setToken(null)
+        clearOfflineCache()
         localStorage.removeItem("esh_user_id")
         setProfile(null)
         setFullProfile(null)

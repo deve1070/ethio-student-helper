@@ -21,6 +21,8 @@ const AM: Record<string, string> = {
   Leaderboard: "የደረጃ ሰንጠረዥ",
   "Mistake Review": "የስህተት ክለሳ",
   "Study Notes": "የጥናት ማስታወሻዎች",
+  "You're offline. Notes and plans you've opened are still here; practice needs a connection.":
+    "ከመስመር ውጭ ነዎት። የከፈቷቸው ማስታወሻዎችና እቅዶች አሉ፤ ልምምድ ግን ኢንተርኔት ይፈልጋል።",
 
   // login and sign-up
   "Welcome back": "እንኳን በደህና ተመለሱ",

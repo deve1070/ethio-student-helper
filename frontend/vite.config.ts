@@ -3,6 +3,19 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const OFFLINE_API_CACHE = 'esh-api' // also named in src/lib/auth.tsx, which clears it on logout
+const OFFLINE_API_PATHS = [
+  '/v1/auth/me',
+  '/v1/notes/',
+  '/v1/study-plan/week',
+  '/v1/esslce/mistakes',
+  '/v1/practice/mistakes',
+  '/v1/progress/',
+  '/v1/esslce/subjects',
+  '/v1/esslce/units',
+  '/v1/esslce/papers',
+]
+
 export default defineConfig({
   plugins: [
     react(),
@@ -25,10 +38,27 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // API calls are never cached as "offline answers" (the project's own scope decision) -
-        // only the app shell/static assets are. Runtime caching is added later only for the
-        // narrow "view already-fetched questions offline" case, not blanket API caching.
         globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
+        // Read-only pages keep working offline: notes, the study plan, mistakes, progress and the
+        // profile (without /auth/me the app can't get past its login gate at all). Network first,
+        // so online students always get fresh data; the saved copy is used only when the network
+        // fails or takes longer than 6s. Practice and AI help are never cached - answers are
+        // graded and recorded on the server. The cache is cleared on logout (lib/auth.tsx).
+        runtimeCaching: [
+          {
+            // anchored at the start of the URL: workbox only lets a RegExp route match a
+            // cross-origin request (the API is on its own domain in production) from index 0
+            urlPattern: new RegExp(`^https?://[^/]+(${OFFLINE_API_PATHS.join('|')})`),
+            method: 'GET',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: OFFLINE_API_CACHE,
+              networkTimeoutSeconds: 6,
+              expiration: { maxEntries: 300, maxAgeSeconds: 60 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+        ],
       },
     }),
   ],
