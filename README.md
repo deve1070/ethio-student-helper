@@ -1,49 +1,211 @@
 # Ethiopian Student Helper
 
-## Layout
-- `backend/` — FastAPI service (extends the original docchat prototype). Everything else calls this; it's the only thing that touches Postgres, Chroma, and the payment gateway.
-- `telegram_bot/` — thin Telegram client. Calls `backend/` over HTTP via `telegram_bot/api_client.py`.
-- `docs/data-model-api.md` — schema, API contract, folder structure, and open decisions.
+An exam-preparation platform for Ethiopian students in Grades 9–12, built around the
+national exam (ESSLCE). It has a web app, an installable PWA, and a Telegram bot, all
+backed by one API.
 
-## Providers
-LLM generation runs on **Groq** (fast, free tier) and embeddings on **Gemini's text-embedding-004** (Groq doesn't serve embedding models). Get free keys at console.groq.com and aistudio.google.com. See `backend/.env.example` for every environment variable the backend needs.
+Students get AI explanations grounded in the Ministry of Education textbooks, a bank of
+past ESSLCE questions with answers and explanations, practice by unit, study notes, a
+weekly study plan, and a daily group practice in Telegram with a leaderboard.
 
-## Getting the backend running
+## Features
+
+**Learning**
+- **Ask the textbook** — free-text questions answered from the MoE textbooks, scoped to a
+  grade and subject, with citations (textbook, unit, page). An answer is returned only if
+  it can quote a matching passage; otherwise the app says it doesn't know.
+- **ESSLCE past papers** — practice by year, by unit or by skill, or sit a full timed exam
+  with results at the end. Math is rendered properly; questions with diagrams show the
+  original page photo.
+- **Deeper help on a question** — "Explain more" (cached per question) and a free-form
+  "Ask about this" chat, both grounded in the textbook.
+- **Practice and mistakes** — unit-based practice from the approved question bank, accuracy
+  per unit, and a review of past mistakes.
+- **Study notes** — per-topic notes with worked examples and formulas, downloadable as PDF.
+- **Study plan** — a multi-day plan paced to the student's exam date.
+- **Solve an exam question** — type or photograph a question; answers other students already
+  asked come back instantly from a shared cache.
+
+**Daily mass practice (Telegram, subscribers only)**
+- A fixed evening time each day, with a heads-up message 10 minutes before.
+- Native Telegram polls in a private group, one topic per stream. On a day whose subject is
+  not common to both streams, natural-science and social-science students each get their own
+  questions.
+- The full question is posted in the group so students can discuss it; an "Ask AI" button
+  opens the question in the student's own chat.
+- Nothing is revealed during the polls. After the last one, the group gets the ranking and
+  an answer key with explanations.
+- Missed it? `/catchup` answers the same questions privately, with instant results. Those
+  answers keep the student's streak but don't count toward the score ranking.
+- Students whose streak ends tonight get a private reminder.
+- Leaderboards on the web: the latest practice, this week, and most consistent days.
+- Access is gated by subscription: the bot approves join requests only for subscribers and
+  removes lapsed ones daily.
+
+**Accounts and payments**
+- One login across web and Telegram, with a phone number or email; password reset goes
+  through the linked Telegram chat.
+- A one-year subscription (300 ETB). Students pay by bank transfer and submit the receipt;
+  a vision model checks it against the amount and transaction id, and an admin approves or
+  rejects the rest from Telegram. Before subscribing, every account has a small shared
+  allowance of free AI actions.
+- Referral codes, with earnings shown on the profile.
+
+## How it works
+
 ```
+ React PWA (Vercel) ──┐
+                      ├──►  FastAPI backend (Railway) ──►  Postgres + pgvector (Supabase)
+ Telegram bot ────────┘            │                       Supabase Storage (photos, receipts)
+ (Railway worker)                  └──►  Groq (answers), Gemini (cross-check), local embeddings
+```
+
+- **Retrieval.** Textbooks are split into chunks and embedded with `fastembed`
+  (`BAAI/bge-small-en-v1.5`, ONNX Runtime, runs in-process, no API) into pgvector. A question
+  is embedded the same way and searched against its grade and subject.
+- **Grounding.** The model must return a supporting quote, and the answer is rejected unless
+  that quote appears in the retrieved passage. Calculation questions are verified by running
+  the generated code and comparing its result with the keyed answer.
+- **LLMs.** Groq generates; Gemini is a second, independent model that cross-checks answers.
+  Rate-limit and connection errors are retried with backoff (`backend/llm/retry.py`).
+- **Exam bank.** Scanned past papers go through a vision-model extraction pipeline, then
+  keying (an official key when one exists, AI-proposed and quote-verified otherwise), human
+  review, and linking each question to textbook units. Only approved questions reach
+  students.
+- **The bot is a thin client.** It stores only login sessions and reminders; everything else
+  is an HTTP call to the backend.
+
+## Repository layout
+
+```
+backend/            FastAPI service
+  api/              One router per feature (auth, explain, exam, esslce, practice, notes, ...)
+  db/               SQLAlchemy models; migrations/ holds the Alembic history
+  exams/            ESSLCE bank: extraction, keying, linking, serving; `python -m exams.cli`
+  ingestion/        Textbook ingestion
+  retriever/        Embeddings, pgvector store, citations
+  llm/              Groq and Gemini clients, retry logic
+  payments/         Subscription, free-action quota, receipt verification, referrals
+  test/             Standalone test scripts (test_*.py)
+frontend/           React 19, TypeScript, Vite, Tailwind (PWA)
+telegram_bot/       python-telegram-bot client; mass_challenge.py is the daily practice
+docs/               data-model-api.md and dev_plans/ (a design note per feature)
+railway.json        Bot service config on Railway; backend/railway.json is the backend's
+bot.py              Railway entry point for the bot (delegates to telegram_bot/bot.py)
+DEPLOY.md           Step-by-step production deployment
+```
+
+## Getting started
+
+Requirements: Python 3.11, Node 20+, PostgreSQL with the
+[pgvector](https://github.com/pgvector/pgvector) extension, a free
+[Groq](https://console.groq.com) key and a free [Gemini](https://aistudio.google.com) key.
+
+### Backend
+
+```bash
 cd backend
 python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in GROQ_API_KEY, GEMINI_API_KEY, DATABASE_URL, etc.
-uvicorn main:app --reload
+pip install -r requirements.txt          # what the server runs (about 700MB)
+cp .env.example .env                     # fill in the keys and DATABASE_URL
+alembic upgrade head                     # create the tables
+uvicorn main:app --reload                # http://localhost:8000, health check at /health
 ```
 
-`requirements.txt` is the slim set the server itself needs. Ingestion, OCR and exam
-extraction need the full set instead: `pip install -r requirements-dev.txt`.
+`requirements.txt` is only what the server imports. Ingesting textbooks, OCR and exam
+extraction need the full set, which pulls in torch: `pip install -r requirements-dev.txt`.
 
-Textbook ingestion (once you have MoE PDFs under `backend/content/moe_textbooks/grade_<N>/<subject>/`):
+### Frontend
+
+```bash
+cd frontend
+npm ci
+npm run dev                              # http://localhost:5173
 ```
+
+In development Vite proxies `/v1` to `http://localhost:8000`. For a deployed build, set
+`VITE_API_BASE_URL` to the backend's URL. `npm run build` type-checks and builds;
+`npm run lint` runs ESLint.
+
+### Telegram bot
+
+```bash
+pip install -r telegram_bot/requirements.txt
+# the bot reads backend/.env; TELEGRAM_BOT_TOKEN comes from @BotFather
+python -m telegram_bot.bot               # run from the repository root
+```
+
+Run a single bot process: login sessions live in one file, which is not safe to share
+between processes. Commands: `/start /login /logout /practice /progress /esslce /explain
+/exam /remind /catchup /status /subscribe /help`.
+
+### Loading content
+
+Textbooks and exam papers are loaded offline, on your own machine, straight into the database
+the server reads. The server never embeds a book.
+
+```bash
+cd backend
+# textbooks: PDFs under content/moe_textbooks/grade_<N>/<subject>/
 python -m ingestion.textbook_ingest
+
+# one past paper, end to end
+python -m exams.cli extract "Biology 2016 ESSLCE.pdf" --subject biology --year-ec 2016 \
+    --provider gemini --vision-model gemini-3.5-flash-lite --out exams_out
+python -m exams.cli load  exams_out/biology_2016
+python -m exams.cli solve biology 2016         # propose answers and textbook links
+python -m exams.cli approve biology 2016 --all-clean
+python -m exams.cli index biology 2016
 ```
 
-## Getting the Telegram bot running
-```
-cd telegram_bot
-pip install -r requirements.txt
-export TELEGRAM_BOT_TOKEN=...      # from @BotFather
-export BACKEND_BASE_URL=http://localhost:8000
-python -m bot
+`python -m exams.cli --help` lists every step and option (some papers need `--stream`,
+`--region` or `--delivery-mode`). Source PDFs are kept as
+`content/<natural|social|common>/<subject>/<subject>_<ec>_<gc>_esslce.pdf`.
+
+## Configuration
+
+Every variable is documented in `backend/.env.example`. The important ones:
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL`, `VECTOR_DATABASE_URL` | Postgres (the second uses the psycopg3 driver) |
+| `GROQ_API_KEY`, `GEMINI_API_KEY` | Answer generation and cross-checking |
+| `JWT_SECRET_KEY` | Signs login tokens; the server refuses the default in production |
+| `ENVIRONMENT` | `production` turns on the startup checks |
+| `ALLOWED_ORIGINS` | The deployed frontend's origin(s), for CORS |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | Storage for diagram photos and receipts (empty = local disk) |
+| `TELEGRAM_BOT_TOKEN`, `BOT_INTERNAL_TOKEN` | The bot, and its shared secret with the backend |
+| `TELEGRAM_PRIVATE_GROUP_ID`, `MASS_CHALLENGE_*` | The daily practice (an id of 0 disables it) |
+| `BOT_DATA_DIR` | Where the bot keeps its state file |
+
+## Tests
+
+Each `backend/test/test_*.py` is a standalone script with its own in-memory database, so no
+services are needed.
+
+```bash
+cd backend
+for f in test/test_*.py; do python "$f" || break; done
 ```
 
-## What's implemented so far
-- `POST /v1/explain` — grounded, cited textbook explanations, scoped to grade + subject
-- `POST /v1/exam/solve` — cache-first exam question solving (text or photo), with citations
-- `POST /v1/auth/signup|login|telegram-link` — one auth system across every client
-- `POST /v1/payments/checkout|webhook`, `GET /v1/me/credits` — Chapa checkout, signature-verified webhook, credit ledger
-- Telegram bot: `/login`, `/explain`, `/exam`, `/credits`, `/buy`
+CI (`.github/workflows/ci.yml`) runs these and the frontend build on every push and pull
+request to `main` and `dev`.
 
-## Known open items
-See `docs/data-model-api.md` section 3, plus inline comments flagged throughout the code:
-- Exam-cache similarity threshold is a placeholder, untuned
-- Credit bundle pricing is a placeholder
-- No auth rate limiting or password reset yet
-- Web app and mobile app clients not started yet
+## Deployment
+
+The frontend runs on Vercel, the backend and the bot on Railway, and the data on Supabase.
+See [DEPLOY.md](DEPLOY.md). Two things to know: run the backend as a single worker, because
+each worker loads its own copy of the embedding model (about 280MB); and give the bot service
+a volume, or every deploy logs all students out.
+
+## Status
+
+Pre-launch. Known gaps:
+- Vector search has no ANN index (no HNSW), so every search scans the whole collection. That
+  is fine at the current corpus size; add one before the corpus or traffic grows a lot.
+- The leaderboard endpoints are public and show full names.
+- Mass practice runs on in-memory scheduled jobs. A restart resumes from the polls already
+  recorded, but a long outage can still lose a day's event.
+- There is no Flutter client yet; the PWA is the mobile app for now.
+
+More design detail is in `docs/dev_plans/` and `docs/data-model-api.md`.
