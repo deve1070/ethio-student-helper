@@ -404,3 +404,11 @@ def mass_challenge_lapsed_memberships() -> list[int]:
     )
     _raise_for_status(response)
     return [row["telegram_user_id"] for row in response.json()["lapsed"]]
+
+
+def weekly_reports() -> list[dict]:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/progress/weekly-reports", headers=_bot_headers(), timeout=120
+    )
+    _raise_for_status(response)
+    return response.json()["reports"]

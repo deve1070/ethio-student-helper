@@ -26,6 +26,8 @@ MASS_CHALLENGE_HEADSUP_MINUTES = int(os.environ.get("MASS_CHALLENGE_HEADSUP_MINU
 # How long after MASS_CHALLENGE_TIME the private streak reminder goes to students who took part
 # yesterday but have not answered today (mass_challenge.send_streak_nudges).
 MASS_CHALLENGE_NUDGE_MINUTES = int(os.environ.get("MASS_CHALLENGE_NUDGE_MINUTES", "60"))
+# Sunday, local time: the weekly progress message to every linked student (weekly_report.py).
+WEEKLY_REPORT_TIME = os.environ.get("WEEKLY_REPORT_TIME", "18:00")
 
 
 def _topic_id(name: str) -> int | None:

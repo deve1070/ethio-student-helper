@@ -168,3 +168,42 @@ async def esslce_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.edit_message_text(UNEXPECTED_ERROR)
         except BadRequest:
             pass
+
+
+async def send_screen(bot, chat_id: int, screen) -> None:
+    """A Screen as NEW messages (text, then any images) - for flows that start from a button on a
+    message that must stay as it is, unlike _show() which edits the tapped message in place."""
+    await bot.send_message(chat_id, screen.text, reply_markup=keyboard(screen))
+    for image, caption, name in (
+        (screen.image_base64, screen.image_caption, "solution.png"),
+        (screen.extra_image_base64, screen.extra_image_caption, "question.png"),
+    ):
+        if image:
+            photo = io.BytesIO(base64.b64decode(image))
+            photo.name = name
+            await bot.send_photo(chat_id, photo, caption=caption)
+
+
+async def weekly_practice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """wp|<subject>|<unit_index> - the weekly report's "Practise this unit" button. Opens ESSLCE
+    practice on that unit through the same EsslceSession steps the /esslce unit picker uses."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not api_client.is_logged_in(user_id):
+        await query.answer("Please /login first, then tap this again.", show_alert=True)
+        return
+    _, subject, index = query.data.split("|")
+    session = EsslceSession(api_client, user_id)
+    session.mode, session.subject = "practice", subject
+    context.user_data[SESSION_KEY] = session
+    try:
+        session.units = (await asyncio.to_thread(api_client.esslce_units, user_id, subject))["units"]
+        screen = await asyncio.to_thread(session.on_unit, int(index))
+    except FlowError:
+        await query.answer("That unit isn't available any more. Send /esslce to pick another.", show_alert=True)
+        return
+    except BackendError as e:
+        await query.answer(friendly_esslce_error(e), show_alert=True)
+        return
+    await query.answer()
+    await send_screen(context.bot, user_id, screen)

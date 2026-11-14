@@ -12,7 +12,7 @@ from telegram.ext import (
     filters,
 )
 
-from telegram_bot import mass_challenge, reminders
+from telegram_bot import mass_challenge, reminders, weekly_report
 from telegram_bot import store as bot_store
 from telegram_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_URL
 from telegram_bot.handlers.auth_handler import login_command, login_text_handler, logout_command
@@ -20,6 +20,7 @@ from telegram_bot.handlers.esslce_handler import (
     esslce_callback,
     esslce_command,
     esslce_text_handler,
+    weekly_practice_callback,
 )
 from telegram_bot.handlers.exam_handler import (
     exam_callback,
@@ -154,6 +155,7 @@ async def post_init(application: Application) -> None:
     mass_challenge.schedule_headsup(application.job_queue, tz)
     mass_challenge.schedule_sweep(application.job_queue, tz)
     mass_challenge.schedule_streak_nudge(application.job_queue, tz)
+    weekly_report.schedule_weekly_report(application.job_queue, tz)
     await mass_challenge.resume_after_restart(application)
 
 
@@ -201,6 +203,7 @@ def build_application() -> Application:
     app.add_handler(ChatJoinRequestHandler(mass_challenge.on_join_request))
     app.add_handler(CallbackQueryHandler(mass_challenge.on_ask_ai_callback, pattern=r"^mq\|"))
     app.add_handler(CommandHandler("catchup", mass_challenge.catchup_command))
+    app.add_handler(CallbackQueryHandler(weekly_practice_callback, pattern=r"^wp\|"))
     app.add_handler(CallbackQueryHandler(mass_challenge.on_catchup_callback, pattern=r"^mc\|"))
     app.add_handler(CallbackQueryHandler(mass_challenge.on_catchup_answer, pattern=r"^ma\|"))
     return app
