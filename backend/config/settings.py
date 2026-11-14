@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     # mass_challenge.py) - a negative chat id once the owner creates the group and adds the bot as
     # admin; 0 means the feature is off (the bot's scheduled jobs no-op rather than erroring).
     TELEGRAM_PRIVATE_GROUP_ID: int = 0
+    # That group's invite link (join requests are approved by the bot, subscribers only). Shown in
+    # the app's Profile page to subscribed students only - api/routes_auth.py's ProfileResponse.
+    TELEGRAM_PRIVATE_GROUP_URL: str = ""
 
     # Mass-practice event timing, overridable per environment without a code change.
     # MASS_CHALLENGE_TIME is read only by telegram_bot/config.py (the bot schedules the job, the

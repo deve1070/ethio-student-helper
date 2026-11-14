@@ -85,6 +85,7 @@ export interface Profile {
   referral_earnings_etb: number
   telegram_group_url: string | null
   telegram_bot_url: string | null
+  private_group_url: string | null
   telegram_linked: boolean
 }
 export interface UpdateProfileBody {
@@ -412,14 +413,22 @@ export interface ConsistencyLeaderboardEntry {
   questions_answered: number
   days_participated: number
 }
-export interface LatestChallenge {
-  id: number
+export interface WeeklyLeaderboardEntry {
+  user_id: string
+  display_name: string
+  correct: number
+  answered: number
+  days_participated: number
+}
+// One day can have two challenges, one per stream, when that day's subject is not common to both.
+export interface LatestChallenges {
   date: string
-  subject: string
-  unit: string
+  challenges: { id: number; stream: string; subject: string; unit: string }[]
 }
 export const massChallenge = {
-  latest: () => get<LatestChallenge | null>("/v1/mass-challenge/latest"),
+  latest: () => get<LatestChallenges | null>("/v1/mass-challenge/latest"),
+  weeklyLeaderboard: () =>
+    get<{ entries: WeeklyLeaderboardEntry[] }>("/v1/mass-challenge/weekly-leaderboard"),
   leaderboard: (challengeId: number) =>
     get<ChallengeLeaderboard>(`/v1/mass-challenge/${challengeId}/leaderboard`),
   consistencyLeaderboard: () =>

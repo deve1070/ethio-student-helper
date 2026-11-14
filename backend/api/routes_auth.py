@@ -12,6 +12,7 @@ from auth.dependencies import get_current_user
 from auth.referral import generate_referral_code
 from auth.security import create_access_token, hash_password, verify_password
 from auth.telegram_notify import send_text
+from payments.entitlement import has_active_subscription
 from payments.referral import REFERRAL_REWARD_ETB
 from config.constants import (
     COMMON_SUBJECTS,
@@ -281,6 +282,7 @@ class ProfileResponse(BaseModel):
     referral_earnings_etb: float
     telegram_group_url: str | None
     telegram_bot_url: str | None
+    private_group_url: str | None  # the subscriber-only practice group; None unless subscribed
     telegram_linked: bool
 
 
@@ -301,6 +303,9 @@ def _profile_response(db: Session, user: User) -> ProfileResponse:
         referral_earnings_etb=user.referral_paid_count * REFERRAL_REWARD_ETB,
         telegram_group_url=settings.TELEGRAM_GROUP_URL or None,
         telegram_bot_url=settings.TELEGRAM_BOT_URL or None,
+        private_group_url=(
+            settings.TELEGRAM_PRIVATE_GROUP_URL or None if has_active_subscription(db, user.id) else None
+        ),
         telegram_linked=db.query(TelegramLink).filter(TelegramLink.user_id == user.id).first() is not None,
     )
 

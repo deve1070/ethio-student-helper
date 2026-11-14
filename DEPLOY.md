@@ -64,7 +64,9 @@ accident:
   `SUPABASE_SERVICE_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `JWT_SECRET_KEY`
   (generate a real random value, don't reuse the dev default),
   `BOT_INTERNAL_TOKEN` (generate one - must match the bot service's value
-  exactly), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_PRIVATE_GROUP_ID`, `ENVIRONMENT=production`,
+  exactly), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_PRIVATE_GROUP_ID`, `TELEGRAM_PRIVATE_GROUP_URL`
+  (the subscriber group's invite link, shown on the Profile page to subscribers only),
+  `ENVIRONMENT=production`,
   `ALLOWED_ORIGINS` (fill in once you have the Vercel URL from step 4).
 - Generate a public domain for this service (Settings → Networking) - you'll
   need its URL for both the frontend's `VITE_API_BASE_URL` and the bot's
@@ -89,7 +91,7 @@ accident:
   at ~56MB RSS idle, no embedding model, no torch. 0.5 vCPU / 0.5GB is generous.
 - Variables: `TELEGRAM_BOT_TOKEN`, `BOT_INTERNAL_TOKEN` (same value as the
   backend's), `TELEGRAM_GROUP_URL`, `TELEGRAM_PRIVATE_GROUP_ID` (same value as
-  the backend's), `MASS_CHALLENGE_TIME`, `MASS_CHALLENGE_HEADSUP_MINUTES`,
+  the backend's), `MASS_CHALLENGE_TIME`, `MASS_CHALLENGE_HEADSUP_MINUTES`, `MASS_CHALLENGE_NUDGE_MINUTES`,
   `MASS_CHALLENGE_NATURAL_TOPIC_ID`, `MASS_CHALLENGE_SOCIAL_TOPIC_ID`, `BOT_DATA_DIR=/data`, and
   `BACKEND_BASE_URL` = the backend service's public URL from step 3a (Railway's
   private-networking domain, `<service>.railway.internal`, is a worthwhile

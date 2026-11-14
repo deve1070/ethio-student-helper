@@ -200,6 +200,30 @@ export function ProfilePage() {
         </Card>
       )}
 
+      {fullProfile?.private_group_url && (
+        <Card className="flex items-center gap-4 border-brand-200 bg-brand-50/60 p-4">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand-600">
+            <TelegramIcon className="size-5 text-white" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-zinc-900">Daily mass practice — subscribers only</p>
+            <p className="mt-0.5 text-sm text-zinc-600">
+              Every evening, the whole group answers the same ESSLCE questions together, then sees
+              the answers and the day's ranking. Link your Telegram account first so your request to
+              join is approved.
+            </p>
+            <a
+              href={fullProfile.private_group_url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-brand-700 hover:underline"
+            >
+              Request to join →
+            </a>
+          </div>
+        </Card>
+      )}
+
       {fullProfile?.telegram_group_url && (
         <Card className="flex items-center gap-4 p-4">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#29A9EB]">

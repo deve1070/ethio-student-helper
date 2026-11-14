@@ -1,15 +1,20 @@
 import { useEffect, useState } from "react"
-import { Flame, Trophy } from "lucide-react"
+import { CalendarDays, Flame, Trophy } from "lucide-react"
 import { Card } from "../../components/ui/Card"
 import { EmptyState, ErrorBanner, FullPageSpinner, SectionHeading } from "../../components/ui/Primitives"
 import {
   type ChallengeLeaderboard,
   type ConsistencyLeaderboardEntry,
+  type WeeklyLeaderboardEntry,
   errorMessage,
   massChallenge,
 } from "../../lib/api"
 
 const MEDALS = ["🥇", "🥈", "🥉"]
+const STREAM_NAMES: Record<string, string> = {
+  natural_science: "Natural stream",
+  social_science: "Social stream",
+}
 
 function RankRow({
   rank,
@@ -38,16 +43,30 @@ function RankRow({
   )
 }
 
+type DayBoard = ChallengeLeaderboard & { stream: string }
+
 export function LeaderboardPage() {
-  const [today, setToday] = useState<ChallengeLeaderboard | null | "none">(null)
+  const [latest, setLatest] = useState<DayBoard[] | null>(null)
+  const [weekly, setWeekly] = useState<WeeklyLeaderboardEntry[] | null>(null)
   const [consistency, setConsistency] = useState<ConsistencyLeaderboardEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     massChallenge
       .latest()
-      .then((latest) => (latest ? massChallenge.leaderboard(latest.id) : null))
-      .then((board) => setToday(board ?? "none"))
+      .then((day) =>
+        Promise.all(
+          (day?.challenges ?? []).map((c) =>
+            massChallenge.leaderboard(c.id).then((board) => ({ ...board, stream: c.stream })),
+          ),
+        ),
+      )
+      .then(setLatest)
+      .catch((e) => setError(errorMessage(e)))
+
+    massChallenge
+      .weeklyLeaderboard()
+      .then((r) => setWeekly(r.entries))
       .catch((e) => setError(errorMessage(e)))
 
     massChallenge
@@ -57,35 +76,63 @@ export function LeaderboardPage() {
   }, [])
 
   if (error) return <ErrorBanner message={error} />
-  if (today === null || consistency === null) return <FullPageSpinner />
+  if (latest === null || weekly === null || consistency === null) return <FullPageSpinner />
+
+  const played = latest.filter((board) => board.entries.length > 0)
 
   return (
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2.5">
-        <SectionHeading>Today's mass practice</SectionHeading>
-        {today === "none" || today.entries.length === 0 ? (
+        <SectionHeading>Latest mass practice</SectionHeading>
+        {played.length === 0 ? (
           <EmptyState
             icon={Trophy}
             title="No results yet"
             description="Join tonight's practice in the Telegram group to show up here."
           />
         ) : (
-          <>
-            <p className="text-sm text-zinc-500">
-              {today.subject.replace(/_/g, " ")} - {today.unit}
-            </p>
-            <Card className="overflow-hidden">
-              {today.entries.map((entry, i) => (
-                <RankRow
-                  key={entry.user_id}
-                  rank={i}
-                  name={entry.display_name}
-                  primary={`${entry.correct}/${today.total_questions}`}
-                  secondary={`${entry.answered} answered`}
-                />
-              ))}
-            </Card>
-          </>
+          played.map((board) => (
+            <div key={board.challenge_id} className="flex flex-col gap-2">
+              <p className="text-sm text-zinc-500">
+                {STREAM_NAMES[board.stream] ? `${STREAM_NAMES[board.stream]} · ` : ""}
+                <span className="capitalize">{board.subject.replace(/_/g, " ")}</span> — {board.unit}
+              </p>
+              <Card className="overflow-hidden">
+                {board.entries.map((entry, i) => (
+                  <RankRow
+                    key={entry.user_id}
+                    rank={i}
+                    name={entry.display_name}
+                    primary={`${entry.correct}/${board.total_questions}`}
+                    secondary={`${entry.answered} answered`}
+                  />
+                ))}
+              </Card>
+            </div>
+          ))
+        )}
+      </section>
+
+      <section className="flex flex-col gap-2.5">
+        <SectionHeading>This week</SectionHeading>
+        {weekly.length === 0 ? (
+          <EmptyState
+            icon={CalendarDays}
+            title="No answers this week yet"
+            description="Correct answers in the last 7 days of mass practice are counted here."
+          />
+        ) : (
+          <Card className="overflow-hidden">
+            {weekly.map((entry, i) => (
+              <RankRow
+                key={entry.user_id}
+                rank={i}
+                name={entry.display_name}
+                primary={`${entry.correct} correct`}
+                secondary={`${entry.answered} answered · ${entry.days_participated} days`}
+              />
+            ))}
+          </Card>
         )}
       </section>
 
@@ -94,8 +141,8 @@ export function LeaderboardPage() {
         {consistency.length === 0 ? (
           <EmptyState
             icon={Flame}
-            title="Nobody has a streak yet"
-            description="Days you join the mass practice count toward this."
+            title="Nobody has taken part yet"
+            description="Each day you answer the mass practice, live or by catching up, counts here."
           />
         ) : (
           <Card className="overflow-hidden">
