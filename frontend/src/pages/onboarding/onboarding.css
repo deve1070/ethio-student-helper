@@ -1,0 +1,202 @@
+/* Onboarding motion. Plain CSS keyframes, loaded only with this page's lazy chunk, so the rest of
+   the app carries none of it. Every animation is switched off under prefers-reduced-motion. */
+
+.ob-stage {
+  background:
+    radial-gradient(120% 80% at 50% -10%, #1d6b5a 0%, transparent 60%),
+    linear-gradient(160deg, #08241f 0%, #0f3f37 45%, #0b2e28 100%);
+}
+
+/* drifting colour blobs behind everything */
+.ob-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  opacity: 0.55;
+  animation: ob-drift 18s ease-in-out infinite alternate;
+}
+@keyframes ob-drift {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(40px, -30px) scale(1.15); }
+  100% { transform: translate(-30px, 40px) scale(0.95); }
+}
+
+/* subject glyphs floating upward */
+.ob-float {
+  position: absolute;
+  bottom: -60px;
+  color: rgba(255, 255, 255, 0.12);
+  animation: ob-rise linear infinite;
+}
+@keyframes ob-rise {
+  0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(-110vh) rotate(200deg); opacity: 0; }
+}
+
+/* step transitions: direction is set by the data-dir attribute */
+.ob-step { animation: ob-in-fwd 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.ob-step[data-dir="back"] { animation-name: ob-in-back; }
+@keyframes ob-in-fwd {
+  from { opacity: 0; transform: translateX(48px) scale(0.98); filter: blur(4px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes ob-in-back {
+  from { opacity: 0; transform: translateX(-48px) scale(0.98); filter: blur(4px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+
+/* staggered children: style="--i: n" sets each child's delay */
+.ob-rise-in {
+  animation: ob-rise-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 70ms + 120ms);
+}
+@keyframes ob-rise-in {
+  from { opacity: 0; transform: translateY(22px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* logo: soft bob plus two expanding rings */
+.ob-logo { animation: ob-bob 4s ease-in-out infinite; }
+@keyframes ob-bob {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-8px) rotate(3deg); }
+}
+.ob-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 1.75rem;
+  border: 2px solid rgba(113, 211, 182, 0.6);
+  animation: ob-ring 2.6s ease-out infinite;
+}
+.ob-ring:nth-child(2) { animation-delay: 1.3s; }
+@keyframes ob-ring {
+  from { transform: scale(1); opacity: 0.8; }
+  to { transform: scale(1.8); opacity: 0; }
+}
+
+/* headline gradient that slowly shifts */
+.ob-shimmer {
+  background: linear-gradient(90deg, #ffffff 0%, #a6e6d0 30%, #f2a73b 55%, #ffffff 80%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ob-shimmer 6s linear infinite;
+}
+@keyframes ob-shimmer {
+  to { background-position: -250% 0; }
+}
+
+/* frosted card used for every choice */
+.ob-glass {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), background 0.25s, border-color 0.25s, box-shadow 0.25s;
+}
+.ob-glass:hover { background: rgba(255, 255, 255, 0.11); transform: translateY(-2px); }
+.ob-glass:active { transform: scale(0.97); }
+.ob-glass[data-on="true"] {
+  background: rgba(63, 185, 154, 0.18);
+  border-color: rgba(113, 211, 182, 0.85);
+  box-shadow: 0 0 0 1px rgba(113, 211, 182, 0.5), 0 10px 40px -10px rgba(63, 185, 154, 0.6);
+  animation: ob-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes ob-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+/* check badge on a selected card */
+.ob-check { animation: ob-check-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes ob-check-in {
+  from { transform: scale(0) rotate(-90deg); }
+  to { transform: scale(1) rotate(0deg); }
+}
+
+/* primary call to action with a moving sheen */
+.ob-cta {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #3fb99a, #137a63);
+  box-shadow: 0 12px 30px -10px rgba(63, 185, 154, 0.75);
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+}
+.ob-cta:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 16px 36px -10px rgba(63, 185, 154, 0.9); }
+.ob-cta:active:not(:disabled) { transform: scale(0.98); }
+.ob-cta:disabled { opacity: 0.45; cursor: not-allowed; }
+.ob-cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.35) 50%, transparent 70%);
+  transform: translateX(-100%);
+  animation: ob-sheen 3.2s ease-in-out infinite;
+}
+@keyframes ob-sheen {
+  0%, 55% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* progress bar fill */
+.ob-progress-fill {
+  background: linear-gradient(90deg, #3fb99a, #f2a73b);
+  box-shadow: 0 0 12px rgba(242, 167, 59, 0.6);
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* daily-goal ring */
+.ob-ring-arc { transition: stroke-dashoffset 0.8s cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* countdown number bump when the date changes */
+.ob-bump { animation: ob-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* done screen: checkmark drawn stroke by stroke */
+.ob-draw-circle {
+  stroke-dasharray: 302;
+  stroke-dashoffset: 302;
+  animation: ob-draw 0.8s 0.15s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+.ob-draw-tick {
+  stroke-dasharray: 80;
+  stroke-dashoffset: 80;
+  animation: ob-draw 0.5s 0.85s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+@keyframes ob-draw { to { stroke-dashoffset: 0; } }
+
+/* confetti pieces: --x, --r, --d set per piece */
+.ob-confetti {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: ob-burst 1.6s cubic-bezier(0.15, 0.6, 0.35, 1) forwards;
+  animation-delay: var(--d);
+}
+@keyframes ob-burst {
+  0% { opacity: 1; transform: translate(-50%, 0) rotate(0deg) scale(0.4); }
+  25% { opacity: 1; transform: translate(calc(-50% + var(--x) * 0.6), var(--y)) rotate(calc(var(--r) * 0.5)) scale(1); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--x)), 70vh) rotate(var(--r)) scale(0.9); }
+}
+
+/* date input on the dark background */
+.ob-date { color-scheme: dark; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-stage *,
+  .ob-stage *::before,
+  .ob-stage *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .ob-float,
+  .ob-confetti { display: none; }
+}
