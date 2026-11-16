@@ -53,6 +53,9 @@ accident:
   automatically (build: `pip install -r requirements.txt`; start: `uvicorn
   main:app --host 0.0.0.0 --port $PORT` - deliberately no `--workers` flag, since
   each worker would load its own separate copy of the ~280MB embedding model).
+  Before each deploy goes live it runs `alembic upgrade head` (`preDeployCommand`), so
+  new database migrations apply themselves; a failed migration stops the deploy and
+  the previous version keeps serving.
   `backend/requirements.txt` is the slim production set (only what the live server
   imports); the offline ingestion/OCR/extraction tooling lives in
   `backend/requirements-dev.txt`, which is what to install on a development machine.
