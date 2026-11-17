@@ -1,1 +1,7 @@
--r telegram_bot/requirements.txt
+# The Telegram bot's dependencies. They live at the repository root because the bot runs from here
+# (its code imports itself as telegram_bot.*), and Railway installs this file before copying the rest
+# of the source, so it must not point at another file. The backend's are in backend/requirements.txt.
+python-telegram-bot[job-queue]==21.9
+httpx==0.28.1
+python-dotenv==1.0.1
+sentry-sdk==2.19.2

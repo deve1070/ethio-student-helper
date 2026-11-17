@@ -148,7 +148,7 @@ In development Vite proxies `/v1` to `http://localhost:8000`. For a deployed bui
 ### Telegram bot
 
 ```bash
-pip install -r telegram_bot/requirements.txt
+pip install -r requirements.txt          # from the repository root
 # the bot reads backend/.env; TELEGRAM_BOT_TOKEN comes from @BotFather
 python -m telegram_bot.bot               # run from the repository root
 ```
