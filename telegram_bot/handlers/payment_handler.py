@@ -9,6 +9,8 @@ see backend/payments/receipt_verification.py.
 
 Admin-only (the backend checks the calling account's is_admin flag, not this file):
 /pending_payments — list payments awaiting manual review, each with Approve/Reject buttons.
+/pending_payouts — list referral payout requests with the amount and the account to send it to,
+each with Mark paid/Reject buttons (the same buttons are on the push sent when a student asks).
 The same Approve/Reject buttons also appear on the notification pushed straight to an admin's
 chat the moment a receipt needs review (backend/payments/admin_notify.py) - both call the same
 payment_review_callback below.
@@ -180,6 +182,69 @@ async def payment_review_callback(update: Update, context: ContextTypes.DEFAULT_
             outcome = "Already reviewed by someone else."
         else:
             await query.message.reply_text(f"Couldn't update that payment: {e.detail}")
+            return
+
+    await query.edit_message_reply_markup(reply_markup=None)
+    await query.message.reply_text(outcome)
+
+
+def _payout_keyboard(payout_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Mark paid", callback_data=f"RP|paid|{payout_id}"),
+                InlineKeyboardButton("Reject", callback_data=f"RP|reject|{payout_id}"),
+            ]
+        ]
+    )
+
+
+async def pending_payouts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    telegram_user_id = update.effective_user.id
+    if not api_client.is_logged_in(telegram_user_id):
+        await update.message.reply_text("Please /login first with your phone/email and password.")
+        return
+
+    try:
+        pending = await asyncio.to_thread(api_client.list_pending_payouts, telegram_user_id)
+    except BackendError as e:
+        if e.status_code == 403:
+            await update.message.reply_text("This command is for admins only.")
+            return
+        await update.message.reply_text("Couldn't load payout requests right now — try again shortly.")
+        return
+
+    if not pending:
+        await update.message.reply_text("No referral payouts are waiting.")
+        return
+
+    total = sum(p["amount_etb"] for p in pending)
+    await update.message.reply_text(f"{len(pending)} payout(s) waiting, {total:.2f} ETB in total.")
+    for p in pending:
+        await update.message.reply_text(p["text"], reply_markup=_payout_keyboard(p["payout_id"]))
+
+
+async def payout_review_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The Mark paid/Reject buttons, from /pending_payouts or the push sent when a student asks."""
+    query = update.callback_query
+    await query.answer()
+    telegram_user_id = update.effective_user.id
+    if not api_client.is_logged_in(telegram_user_id):
+        await query.message.reply_text("Please /login first with your phone/email and password.")
+        return
+
+    _, action, payout_id = query.data.split("|", 2)
+    try:
+        await asyncio.to_thread(api_client.review_payout, telegram_user_id, payout_id, action)
+        outcome = "Marked paid. The student has been told." if action == "paid" else "Rejected. The amount is back in the student's balance."
+    except BackendError as e:
+        if e.status_code == 403:
+            await query.message.reply_text("This action is for admins only.")
+            return
+        if e.status_code == 409:
+            outcome = "Already handled by someone else."
+        else:
+            await query.message.reply_text(f"Couldn't update that payout: {e.detail}")
             return
 
     await query.edit_message_reply_markup(reply_markup=None)

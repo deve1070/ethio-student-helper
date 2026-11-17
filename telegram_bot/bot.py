@@ -38,6 +38,8 @@ from telegram_bot.handlers.explain_handler import (
 from telegram_bot.handlers.payment_handler import (
     payment_review_callback,
     pending_payments_command,
+    pending_payouts_command,
+    payout_review_callback,
     receipt_photo_handler,
     status_command,
     subscribe_command,
@@ -209,10 +211,12 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("subscribe", subscribe_command))
     app.add_handler(CommandHandler("pending_payments", pending_payments_command))
+    app.add_handler(CommandHandler("pending_payouts", pending_payouts_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("language", language_command))
     app.add_handler(CallbackQueryHandler(language_callback, pattern=r"^lang\|"))
     app.add_handler(CallbackQueryHandler(payment_review_callback, pattern=r"^PM\|"))
+    app.add_handler(CallbackQueryHandler(payout_review_callback, pattern=r"^RP\|"))
     app.add_handler(MessageHandler(filters.PHOTO, exam_photo_handler))
     # Different group (1, not the default 0): both this and exam_photo_handler above must see
     # every photo update, since each one checks its OWN caption prefix and silently no-ops on

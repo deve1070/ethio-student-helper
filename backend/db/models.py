@@ -330,6 +330,39 @@ class FreeActionUsage(Base):
     )
 
 
+class ReferralPayout(Base):
+    """A student's request to be paid what they earned from referrals (payments/referral.py). The
+    amount is fixed when the request is made: the whole balance available at that moment. A request
+    is 'pending' until an admin sends the money by hand and marks it 'paid', or marks it 'rejected',
+    which returns the amount to the student's balance."""
+
+    __tablename__ = "referral_payouts"
+    __table_args__ = (
+        CheckConstraint("method IN ('telebirr','cbe')", name="ck_referral_payout_method"),
+        CheckConstraint("status IN ('pending','paid','rejected')", name="ck_referral_payout_status"),
+        CheckConstraint("amount_etb > 0", name="ck_referral_payout_amount"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    amount_etb: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    method: Mapped[str] = mapped_column(String(16), nullable=False)
+    account_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    account_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    # what the admin wrote when closing it: the transfer reference when paid, the reason when rejected
+    admin_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+
+
 class Payment(Base):
     __tablename__ = "payments"
 

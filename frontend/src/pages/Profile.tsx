@@ -1,11 +1,10 @@
-import { useState } from "react"
 import { Link } from "react-router-dom"
-import { Atom, Bot, Calendar, Check, Clock, Copy, Landmark, LogOut, Pencil, Users, User } from "lucide-react"
+import { Atom, Bot, Calendar, Check, Clock, Landmark, LogOut, Pencil, User } from "lucide-react"
 import { Button } from "../components/ui/Button"
 import { Card } from "../components/ui/Card"
 import { InstallAppCard } from "../components/ui/InstallAppCard"
+import { ReferralCard } from "../components/profile/ReferralCard"
 import { TelegramIcon } from "../components/ui/icons/TelegramIcon"
-import { Badge } from "../components/ui/Primitives"
 import { useAuth } from "../lib/auth"
 import { LanguageSwitch, useI18n } from "../lib/i18n"
 
@@ -19,19 +18,6 @@ const GOAL_LABELS: Record<number, string> = { 30: "30 minutes", 60: "1 hour", 12
 export function ProfilePage() {
   const { logout, gradeLevel, fullProfile } = useAuth()
   const { t } = useI18n()
-  const [copied, setCopied] = useState(false)
-
-  async function copyReferralCode() {
-    if (!fullProfile) return
-    try {
-      await navigator.clipboard.writeText(fullProfile.referral_code)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // clipboard access can fail (older browser, insecure context) - the code is still shown on
-      // screen for the student to select/copy by hand
-    }
-  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -122,51 +108,7 @@ export function ProfilePage() {
           )}
       </Card>
 
-      {fullProfile?.referral_code && (
-        <Card className="flex flex-col gap-3 border-brand-200 bg-gradient-to-br from-brand-50 to-white p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Users className="size-4 text-brand-600" aria-hidden />
-              <p className="text-sm font-semibold text-zinc-900">Refer & earn</p>
-            </div>
-            <Badge tone="brand">50 ETB / friend</Badge>
-          </div>
-          <p className="text-sm text-zinc-600">
-            Share your code. When a friend signs up with it and becomes a paying student, you earn
-            50 ETB.
-          </p>
-          <button
-            onClick={copyReferralCode}
-            className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5"
-          >
-            <span className="font-mono text-base font-semibold tracking-wider text-zinc-900">
-              {fullProfile.referral_code}
-            </span>
-            {copied ? (
-              <Check className="size-4 text-emerald-600" aria-hidden />
-            ) : (
-              <Copy className="size-4 text-zinc-400" aria-hidden />
-            )}
-          </button>
-          <div className="flex items-center justify-between rounded-lg bg-white px-3 py-2.5 ring-1 ring-brand-100">
-            <div>
-              <p className="text-xs text-zinc-500">You've earned</p>
-              <p className="text-lg font-bold text-brand-700">
-                {fullProfile.referral_earnings_etb.toLocaleString()} ETB
-              </p>
-            </div>
-            <p className="max-w-[55%] text-right text-xs text-zinc-500">
-              {fullProfile.referral_paid_count === 0
-                ? "No paid referrals yet."
-                : `${fullProfile.referral_paid_count} paying student${fullProfile.referral_paid_count === 1 ? "" : "s"} referred`}
-            </p>
-          </div>
-          <p className="text-xs text-zinc-400">
-            Payout is sent manually via Telebirr after admin review - contact support if a referral
-            is missing.
-          </p>
-        </Card>
-      )}
+      {fullProfile?.referral_code && <ReferralCard code={fullProfile.referral_code} />}
 
       <InstallAppCard />
 

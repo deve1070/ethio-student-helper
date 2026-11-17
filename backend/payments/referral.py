@@ -3,10 +3,11 @@ marked 'completed' (the auto-approve path in submit_receipt, and the manual appr
 separate third code path, so the "did this referral count yet" logic never has to be kept in sync by
 hand across both."""
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from auth.telegram_notify import send_text
-from db.models import Payment, User
+from db.models import Payment, ReferralPayout, User
 
 # The one canonical place this business constant lives - api/routes_auth.py's ProfileResponse
 # computes each student's displayed earned total from this, so the "50" never gets duplicated
@@ -46,3 +47,19 @@ def credit_referral_if_first_payment(db: Session, payment: Payment) -> None:
         "Good news - a student you referred just became a paying student! "
         f"You've now referred {referrer.referral_paid_count} paying student(s).",
     )
+
+
+def referral_balance(db: Session, user: User) -> dict[str, float]:
+    """earned: every referral reward so far. paid and pending: payout requests already sent or still
+    waiting for an admin. available: what the student can request now. A rejected request is in none
+    of these, so its amount counts as available again."""
+    totals = dict(
+        db.query(ReferralPayout.status, func.coalesce(func.sum(ReferralPayout.amount_etb), 0))
+        .filter(ReferralPayout.user_id == user.id, ReferralPayout.status.in_(("pending", "paid")))
+        .group_by(ReferralPayout.status)
+        .all()
+    )
+    earned = user.referral_paid_count * REFERRAL_REWARD_ETB
+    paid = float(totals.get("paid", 0))
+    pending = float(totals.get("pending", 0))
+    return {"earned": earned, "paid": paid, "pending": pending, "available": max(earned - paid - pending, 0.0)}

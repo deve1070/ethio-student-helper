@@ -81,8 +81,6 @@ export interface Profile {
   daily_goal_minutes: number | null
   onboarding_completed: boolean
   referral_code: string
-  referral_paid_count: number
-  referral_earnings_etb: number
   telegram_group_url: string | null
   telegram_bot_url: string | null
   private_group_url: string | null
@@ -541,6 +539,32 @@ export interface SubmitReceiptResponse {
   status: "completed" | "pending"
   message: string
 }
+export interface ReferralPayout {
+  payout_id: string
+  amount_etb: number
+  method: "telebirr" | "cbe"
+  account_number: string
+  account_name: string
+  status: "pending" | "paid" | "rejected"
+  admin_note: string | null
+  created_at: string
+  reviewed_at: string | null
+}
+export interface ReferralSummary {
+  reward_per_referral_etb: number
+  paid_referrals: number
+  earned_etb: number
+  paid_etb: number
+  pending_etb: number
+  available_etb: number
+  requests: ReferralPayout[]
+}
+export const referrals = {
+  summary: () => get<ReferralSummary>("/v1/referrals/payouts"),
+  requestPayout: (body: { method: "telebirr" | "cbe"; account_number: string; account_name: string }) =>
+    post<ReferralSummary>("/v1/referrals/payouts", body),
+}
+
 export const payments = {
   entitlement: () => get<EntitlementResponse>("/v1/me/entitlement"),
   submitReceipt: (transactionId: string, file: File) => {

@@ -147,6 +147,27 @@ def reject_payment(telegram_user_id: int, payment_id: str) -> dict:
     return response.json()
 
 
+def list_pending_payouts(telegram_user_id: int) -> list:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/referrals/payouts/pending",
+        headers=_headers(telegram_user_id),
+        timeout=15,
+    )
+    _raise_for_status(response, telegram_user_id)
+    return response.json()
+
+
+def review_payout(telegram_user_id: int, payout_id: str, action: str) -> dict:
+    """action: 'paid' or 'reject'."""
+    response = httpx.post(
+        f"{BACKEND_BASE_URL}/v1/referrals/payouts/{payout_id}/{action}",
+        headers=_headers(telegram_user_id),
+        timeout=15,
+    )
+    _raise_for_status(response, telegram_user_id)
+    return response.json()
+
+
 # ---- practice mode (questions served from the approved question bank; no AI call, no credits) ----------------
 def _get(telegram_user_id: int, path: str, params: dict, timeout: int = 20) -> dict:
     response = httpx.get(

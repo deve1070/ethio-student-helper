@@ -129,7 +129,7 @@ b = r.json()
 assert r.status_code == 200 and b["exam_date"] == "2026-11-30" and b["daily_goal_minutes"] == 60
 
 # ---- 3d. referral codes: every signup gets one; an optional code at signup links the two accounts ----
-assert len(b["referral_code"]) == 8 and b["referral_code"].isupper() and b["referral_paid_count"] == 0
+assert len(b["referral_code"]) == 8 and b["referral_code"].isupper()
 
 r = c.post("/v1/auth/signup", json={"email": "carol@example.com", "password": "longenough123"})
 assert r.status_code == 200, r.text
