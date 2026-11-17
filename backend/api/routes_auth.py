@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from api.rate_limit import limiter
 from auth.dependencies import get_current_user
+from auth.identifiers import normalize_email, normalize_identifier, normalize_phone
 from auth.referral import generate_referral_code
 from auth.security import create_access_token, hash_password, verify_password
 from auth.telegram_notify import send_text
@@ -51,15 +52,19 @@ class SignupRequest(BaseModel):
 @router.post("/signup", response_model=TokenResponse)
 @limiter.limit("5/hour")  # a low ceiling on account creation deters signup/spam abuse
 def signup(request: Request, body: SignupRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    email = normalize_email(body.email) if body.email else None
+    phone_number = None
+    if body.phone_number:
+        try:
+            phone_number = normalize_phone(body.phone_number)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     existing = None
-    if body.email:
-        existing = db.query(User).filter(User.email == body.email).one_or_none()
-    if existing is None and body.phone_number:
-        existing = (
-            db.query(User)
-            .filter(User.phone_number == body.phone_number)
-            .one_or_none()
-        )
+    if email:
+        existing = db.query(User).filter(User.email == email).one_or_none()
+    if existing is None and phone_number:
+        existing = db.query(User).filter(User.phone_number == phone_number).one_or_none()
     if existing is not None:
         raise HTTPException(
             status_code=409,
@@ -78,8 +83,8 @@ def signup(request: Request, body: SignupRequest, db: Session = Depends(get_db))
         referred_by_user_id = referrer.id
 
     user = User(
-        phone_number=body.phone_number,
-        email=body.email,
+        phone_number=phone_number,
+        email=email,
         full_name=body.full_name,
         grade_level=body.grade_level,
         password_hash=hash_password(body.password),
@@ -99,6 +104,7 @@ class LoginRequest(BaseModel):
 
 
 def _find_user_by_identifier(db: Session, identifier: str) -> User | None:
+    identifier = normalize_identifier(identifier)
     return (
         db.query(User)
         .filter((User.email == identifier) | (User.phone_number == identifier))
