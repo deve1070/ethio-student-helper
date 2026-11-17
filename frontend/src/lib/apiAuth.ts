@@ -3,7 +3,9 @@
 // which imports sse.ts back (explain.ask/notes.note stream) and would otherwise be a circular
 // module dependency between the two.
 
-export const BASE = import.meta.env.VITE_API_BASE_URL ?? ""
+// Paths are joined as `${BASE}/v1/...`, so a trailing slash on the configured URL would produce
+// `//v1/...`, which the backend answers with 404.
+export const BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "")
 
 export class ApiError extends Error {
   status: number

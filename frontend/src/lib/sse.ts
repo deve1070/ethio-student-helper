@@ -11,6 +11,7 @@
 // happen, so those failures travel as that last event's "error" field, not an HTTP error status.
 
 import { ApiError, StreamError, getToken } from "./api"
+import { BASE } from "./apiAuth"
 
 export interface StreamEvent {
   stage?: string
@@ -18,8 +19,6 @@ export interface StreamEvent {
   error?: string
   [key: string]: unknown
 }
-
-const BASE = import.meta.env.VITE_API_BASE_URL ?? ""
 
 async function readSseStream(
   res: Response,
