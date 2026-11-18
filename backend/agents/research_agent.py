@@ -1,6 +1,11 @@
+import logging
+import time
+
 from langchain.schema import Document
 from llm.client import LLMClient
 from llm.retry import LLMUnavailableError
+
+logger = logging.getLogger(__name__)
 
 MATH_RULES = r"""- Write mathematics in LaTeX: inline between single dollar signs (for example $A \subseteq B$ or $x^2$) and display equations between double dollar signs ($$ ... $$). Never use \( \) or \[ \] delimiters. Keep ordinary words outside the dollar signs.
             - Never type the | character inside a table or inside math. Write \lvert x \rvert for absolute value and \mid in set-builder notation, for example $\{x \mid x > 0\}$."""
@@ -15,10 +20,8 @@ class ResearchAgent:
         hidden reasoning tokens count against this budget, so a small value
         cuts answers short or leaves them empty.
         """
-        print("Initializing ResearchAgent with Groq LLM client...")
         # 2500: the answer now has a textbook part and an "Explained further" part
         self.model = LLMClient(temperature=0, max_tokens=2500)
-        print("LLM client initialized successfully.")
 
     def sanitize_response(self, response_text: str) -> str:
         """
@@ -71,28 +74,20 @@ class ResearchAgent:
         """
         Generate an answer using the provided documents.
         """
-        print(
-            f"ResearchAgent.generate called with question='{question}' and {len(documents)} documents."
-            + (" (retry with verifier feedback)" if feedback else "")
-        )
         context = "\n\n".join([doc.page_content for doc in documents])
-        print(f"Combined context length: {len(context)} characters.")
         prompt = self.generate_prompt(question, context, feedback)
-        print("Prompt created for the LLM.")
+        started = time.monotonic()
         try:
-            print("Sending prompt to the model...")
             response = self.model.chat(messages=[{"role": "user", "content": prompt}])
-            print("LLM response received.")
         except Exception as e:
-            print(f"Error during model inference: {e}")
+            logger.warning("Answer model call failed: %s", e)
             raise LLMUnavailableError(
                 "Failed to generate answer due to a model error"
             ) from e
         try:
             llm_response = response["choices"][0]["message"]["content"].strip()
-            print(f"Raw LLM response:\n{llm_response}")
         except (KeyError, IndexError) as e:
-            print(f"Unexpected response structure: {e}")
+            logger.warning("Unexpected answer model response structure: %s", e)
             llm_response = (
                 "I cannot answer this question based on the provided documents."
             )
@@ -101,6 +96,11 @@ class ResearchAgent:
             if llm_response
             else "I cannot answer this question based on the provided documents."
         )
-        print(f"Generated answer:{draft_answer}")
+        # one line per answer: the answer text itself stays out of the logs
+        logger.info(
+            "Answer written in %.1fs: %d documents, %d chars of context, %d chars of answer%s",
+            time.monotonic() - started, len(documents), len(context), len(draft_answer),
+            " (retry after a failed check)" if feedback else "",
+        )
 
         return {"draft_answer": draft_answer, "context_used": context}

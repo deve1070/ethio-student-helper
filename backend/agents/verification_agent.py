@@ -149,7 +149,7 @@ class VerificationAgent:
 
         passed = parsed["relevant"] and not parsed["incorrect_claims"] and not parsed["contradictions"]
         report = self.format_verification_report(parsed)
-        logger.info("Verification %s\n%s", "PASS" if passed else "FAIL", report)
+        logger.info("Verification %s | %s", "PASS" if passed else "FAIL", report.strip().replace("\n", " | "))
         return {
             "verification_report": report,
             "status": "PASS" if passed else "FAIL",

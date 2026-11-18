@@ -123,17 +123,15 @@ class DecomposingRetriever:
         first = self.base.invoke(question)
         queries = self.plan(question, first)
 
-        # print() rather than logger.info: the server's default log level hides
-        # INFO, and this line is the quickest way to see what happened.
         if len(queries) <= 1:
-            print(
-                f"[planner] plain search (looks_broad={self.looks_broad(question)}, "
-                f"llm_configured={self.llm is not None}; {self.last_note or 'not asked'})"
+            logger.info(
+                "[planner] plain search (looks_broad=%s, llm_configured=%s; %s)",
+                self.looks_broad(question), self.llm is not None, self.last_note or "not asked",
             )
             self._cache[question] = first
             return first
 
-        print(f"[planner] split into {len(queries)} searches: {queries}")
+        logger.info("[planner] split into %d searches", len(queries))
         subs = [self.base.invoke(q)[: self.per_query] for q in queries]
 
         merged, seen = [], set()
