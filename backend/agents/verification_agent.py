@@ -4,6 +4,8 @@ import logging
 from langchain.schema import Document
 
 from llm.gemini_client import GeminiLLMClient
+from llm.gemini_rest import GeminiRequestError
+from llm.retry import LLMUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +137,9 @@ class VerificationAgent:
         try:
             response = self.model.chat(messages=[{"role": "user", "content": prompt}])
             raw = response["choices"][0]["message"]["content"].strip()
+        except (LLMUnavailableError, GeminiRequestError) as e:
+            # an outage or a configuration problem, not a bug: one warning line, no traceback
+            return error_result(f"model error ({str(e)[:300]})")
         except Exception as e:
             logger.exception("Verifier model call failed")
             return error_result(f"model error ({e})")

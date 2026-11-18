@@ -14,13 +14,18 @@ llm/retry.py. A caller whose result a student is waiting on, but which is only a
 answer verifier), passes a small budget so an overloaded Gemini costs seconds, not minutes.
 
 Overload is per model (a 503 "high demand" on one model while another answers in two seconds was
-measured), so when the main model stays unavailable after its tries, one more try goes to
-settings.GEMINI_FALLBACK_MODEL before giving up.
+measured), so when the main model stays unavailable after its tries, or rejects the request (a
+mistyped model name), one more try goes to settings.GEMINI_FALLBACK_MODEL before giving up.
 """
 
 from config.settings import settings
 from llm.gemini_rest import GeminiREST
+import logging
+
+from llm.gemini_rest import GeminiRequestError
 from llm.retry import LLMUnavailableError, invoke_with_retry
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiLLMClient:
@@ -46,8 +51,9 @@ class GeminiLLMClient:
         main, *fallback = self.models
         try:
             response = invoke_with_retry(main, messages, attempts=self.retry_attempts, max_wait=self.retry_max_wait)
-        except LLMUnavailableError:
+        except (LLMUnavailableError, GeminiRequestError) as e:
             if not fallback:
                 raise
+            logger.warning("Gemini model %r failed (%s); trying %r", main.model_id, str(e)[:160], fallback[0].model_id)
             response = invoke_with_retry(fallback[0], messages, attempts=1)
         return {"choices": [{"message": {"content": response.content}}]}

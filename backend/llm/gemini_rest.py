@@ -12,6 +12,7 @@ retrying is left to llm/retry.py's invoke_with_retry, whose attempts each caller
   GeminiRateLimitError    HTTP 429; llm/retry.py waits and retries it like Groq's RateLimitError
   GeminiUnavailableError  HTTP 500/502/503/504, a timeout or a network failure; retried as a
                           connection error
+  GeminiRequestError      any other 4xx (wrong model name, bad key); not retried
 
 Messages use the same shape the LangChain clients took: {"role": "user"|"assistant"|"system",
 "content": str | [{"type": "text", "text": ...}, {"type": "image_url", "image_url": {"url":
@@ -33,6 +34,11 @@ class GeminiRateLimitError(RuntimeError):
 
 class GeminiUnavailableError(RuntimeError):
     """The model is overloaded or down (5xx), or the request timed out or could not connect."""
+
+
+class GeminiRequestError(RuntimeError):
+    """Any other 4xx: a wrong model name, a bad key, a malformed request. Retrying the same request
+    cannot help, so llm/retry.py does not."""
 
 
 @dataclass
@@ -97,7 +103,7 @@ class GeminiREST:
         if r.status_code >= 500:
             raise GeminiUnavailableError(f"HTTP {r.status_code}: {r.text[:300]}")
         if r.status_code >= 400:
-            raise RuntimeError(f"Gemini request rejected (HTTP {r.status_code}): {r.text[:300]}")
+            raise GeminiRequestError(f"Gemini rejected the request for model {self.model_id!r} (HTTP {r.status_code}): {r.text[:300]}")
 
         data = r.json()
         candidates = data.get("candidates") or []

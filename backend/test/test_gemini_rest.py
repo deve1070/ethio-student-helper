@@ -90,5 +90,22 @@ except retry.LLMUnavailableError:
 replies.extend([(503, {}), (200, {"candidates": [{"content": {"parts": [{"text": "fine"}]}}]})])
 check("recovers on the second try", retry.invoke_with_retry(client, [{"role": "user", "content": "x"}], attempts=2).content == "fine")
 
+# a rejected main model (a mistyped name) falls back to the backup model once
+from llm.gemini_client import GeminiLLMClient  # noqa: E402
+
+chat = GeminiLLMClient(model_id="bad name", timeout=5, retry_attempts=1)
+chat.models[1].model_id = "backup-model"
+before = len(sent)
+replies.extend([(400, {"error": {"message": "unexpected model name format"}}),
+                (200, {"candidates": [{"content": {"parts": [{"text": "from backup"}]}}]})])
+out = chat.chat([{"role": "user", "content": "x"}])["choices"][0]["message"]["content"]
+check("rejected main model falls back to the backup", out == "from backup" and "/models/backup-model:" in sent[-1]["url"] and len(sent) - before == 2)
+
+# pasted model names are cleaned before use
+from config.settings import Settings  # noqa: E402
+
+os.environ["GEMINI_CHAT_MODEL"] = ' "models/gemini-2.5-flash" '
+check("model name cleaned of spaces, quotes and models/", Settings().GEMINI_CHAT_MODEL == "gemini-2.5-flash")
+
 print(f"\n{failures} failure(s)")
 sys.exit(1 if failures else 0)

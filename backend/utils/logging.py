@@ -1,13 +1,21 @@
 import inspect
 import logging
+import sys
 
 from loguru import logger
 
+# diagnose=False on every sink: loguru's default prints the value of every variable in every frame of
+# an error's traceback, which put prompts, students' questions and textbook text into the logs, and
+# could print a key or password held in a local variable. The traceback itself is still shown.
+logger.remove()
+logger.add(sys.stderr, level="INFO", backtrace=False, diagnose=False)
 logger.add(
     "app.log",
     rotation="10 MB",
     retention="30 days",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+    backtrace=False,
+    diagnose=False,
 )
 
 

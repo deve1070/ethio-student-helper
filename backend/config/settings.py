@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     # safe for local dev, same convention as JWT_SECRET_KEY above.
     BOT_INTERNAL_TOKEN: str = "dev-only-change-me"
 
+    @field_validator("GROQ_MODEL", "GEMINI_CHAT_MODEL", "GEMINI_FALLBACK_MODEL")
+    @classmethod
+    def _clean_model(cls, value: str) -> str:
+        # A model id is put into the request as written, and Google answers " gemini-2.5-flash" or
+        # "\"gemini-2.5-flash\"" with 400 "unexpected model name format" (measured). Spaces and quotes
+        # from a pasted value are dropped, and Google's own "models/" prefix is accepted.
+        return value.strip().strip("\"'").strip().removeprefix("models/")
+
     @field_validator("TELEGRAM_CHANNEL_URL", "TELEGRAM_BOT_URL", "TELEGRAM_PRIVATE_GROUP_URL")
     @classmethod
     def _clean_link(cls, value: str) -> str:
