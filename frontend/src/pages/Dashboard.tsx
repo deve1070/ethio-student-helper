@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { BookOpenCheck, BookText, Calendar, GraduationCap, MessageCircleQuestion, RotateCcw, Sparkles } from "lucide-react"
-import { Card, CardButton } from "../components/ui/Card"
+import { BarChart3, BookText, Calendar, CalendarDays, MessageCircleQuestion, RotateCcw, Sparkles } from "lucide-react"
+import { Card } from "../components/ui/Card"
 import { InstallAppCard } from "../components/ui/InstallAppCard"
 import { ReadinessCard } from "../components/ui/ReadinessCard"
 import { Spinner } from "../components/ui/Primitives"
@@ -73,35 +73,12 @@ export function DashboardPage() {
     }
   }
 
+  // Practice and the ESSLCE bank are tabs in the bottom bar, so the shortcuts here are the rest.
   const tiles = [
-    {
-      icon: MessageCircleQuestion,
-      title: t("Ask a question"),
-      description: t("Get a grounded explanation from your Grade {n} textbooks.", { n: gradeLevel }),
-      to: "/explain",
-      color: "bg-brand-600",
-    },
-    {
-      icon: BookOpenCheck,
-      title: t("Practice"),
-      description: t("Multiple-choice questions from your textbooks, by subject and unit."),
-      to: "/practice",
-      color: "bg-accent-500",
-    },
-    {
-      icon: GraduationCap,
-      title: t("ESSLCE exam bank"),
-      description: t("Grade 12 national exam past papers - practice, mock exams, and diagnostics."),
-      to: "/esslce",
-      color: "bg-zinc-800",
-    },
-    {
-      icon: BookText,
-      title: t("Study notes"),
-      description: t("Topic summaries, key formulas, and worked examples from your textbooks."),
-      to: "/notes",
-      color: "bg-emerald-600",
-    },
+    { icon: MessageCircleQuestion, title: t("Ask a question"), hint: t("From your Grade {n} textbooks", { n: gradeLevel }), to: "/explain", color: "bg-brand-600" },
+    { icon: BookText, title: t("Study notes"), hint: t("Summaries and formulas"), to: "/notes", color: "bg-emerald-600" },
+    { icon: CalendarDays, title: t("Study plan"), hint: t("Your week at a glance"), to: "/study-plan", color: "bg-accent-500" },
+    { icon: BarChart3, title: t("Progress"), hint: t("Accuracy and weak units"), to: "/progress", color: "bg-zinc-800" },
   ]
 
   return (
@@ -189,20 +166,23 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <p className="text-sm text-zinc-500">{t("What would you like to study today?")}</p>
-      {tiles.map((tile) => (
-        <CardButton key={tile.to} onClick={() => navigate(tile.to)} className="p-4">
-          <div className="flex items-center gap-4">
-            <div className={`flex size-11 shrink-0 items-center justify-center rounded-xl ${tile.color}`}>
+      <div className="grid grid-cols-2 gap-3">
+        {tiles.map((tile) => (
+          <button
+            key={tile.to}
+            onClick={() => navigate(tile.to)}
+            className="flex flex-col items-start gap-2.5 rounded-2xl border border-zinc-200/70 bg-white p-3.5 text-left shadow-[var(--shadow-card)] transition-all hover:border-brand-300 active:scale-[0.98]"
+          >
+            <span className={`flex size-10 items-center justify-center rounded-xl ${tile.color}`}>
               <tile.icon className="size-5 text-white" aria-hidden />
-            </div>
-            <div>
-              <p className="font-semibold text-zinc-900">{tile.title}</p>
-              <p className="mt-0.5 text-sm text-zinc-500">{tile.description}</p>
-            </div>
-          </div>
-        </CardButton>
-      ))}
+            </span>
+            <span>
+              <span className="block text-sm font-semibold text-zinc-900">{tile.title}</span>
+              <span className="block text-xs text-zinc-500">{tile.hint}</span>
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

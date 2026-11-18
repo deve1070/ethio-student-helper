@@ -81,7 +81,7 @@ export interface Profile {
   daily_goal_minutes: number | null
   onboarding_completed: boolean
   referral_code: string
-  telegram_group_url: string | null
+  telegram_channel_url: string | null
   telegram_bot_url: string | null
   private_group_url: string | null
   telegram_linked: boolean
@@ -93,12 +93,19 @@ export interface UpdateProfileBody {
   exam_date?: string
   daily_goal_minutes?: number
 }
+export interface PublicConfig {
+  telegram_channel_url: string | null
+  telegram_bot_url: string | null
+  subscription_price_etb: number
+  referral_reward_etb: number
+  payment_telebirr_number: string
+  payment_cbe_account: string
+}
 export interface PasswordResetRequestResponse {
   status: "code_sent" | "no_telegram_link"
 }
 export const auth = {
-  publicConfig: () =>
-    get<{ telegram_group_url: string | null; telegram_bot_url: string | null }>("/v1/auth/public-config"),
+  publicConfig: () => get<PublicConfig>("/v1/auth/public-config"),
   signup: (body: {
     phone_number?: string
     email?: string

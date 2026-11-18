@@ -5,15 +5,12 @@ import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
 import { ErrorBanner, Field, TextInput } from "../../components/ui/Primitives"
 import { errorMessage, payments } from "../../lib/api"
+import { usePublicConfig } from "../../lib/publicConfig"
 
-const SUBSCRIPTION_AMOUNT_ETB = 300
-
-// Matches telegram_bot/handlers/payment_handler.py's receiving accounts - public by design.
-const TELEBIRR_NUMBER = "0909575318"
-const CBE_ACCOUNT_NUMBER = "1000198942948"
 
 export function BuyPage() {
   const navigate = useNavigate()
+  const config = usePublicConfig()
   const [transactionId, setTransactionId] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
@@ -67,12 +64,18 @@ export function BuyPage() {
       </button>
 
       <Card className="flex flex-col gap-2 p-4 text-sm">
-        <p className="font-medium text-zinc-900">
-          Send {SUBSCRIPTION_AMOUNT_ETB} ETB to one of these, then submit your receipt below - that's
-          a full year of unlimited access, one payment.
-        </p>
-        <p className="text-zinc-600">Telebirr: {TELEBIRR_NUMBER}</p>
-        <p className="text-zinc-600">CBE: {CBE_ACCOUNT_NUMBER}</p>
+        {config ? (
+          <>
+            <p className="font-medium text-zinc-900">
+              Send {config.subscription_price_etb} ETB to one of these, then submit your receipt below - that's
+              a full year of unlimited access, one payment.
+            </p>
+            <p className="text-zinc-600">Telebirr: {config.payment_telebirr_number}</p>
+            <p className="text-zinc-600">CBE: {config.payment_cbe_account}</p>
+          </>
+        ) : (
+          <p className="text-zinc-500">Loading payment details...</p>
+        )}
       </Card>
 
       <form onSubmit={submit} className="flex flex-col gap-4">

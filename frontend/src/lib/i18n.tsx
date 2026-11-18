@@ -117,6 +117,32 @@ const AM: Record<string, string> = {
   "Go to Dashboard": "ወደ መነሻ ገጽ",
 
   // profile
+  Edit: "አስተካክል",
+  Student: "ተማሪ",
+  "Your account": "መለያዎ",
+  Active: "ንቁ",
+  "Free plan": "ነፃ",
+  "Telegram bot": "የቴሌግራም ቦት",
+  Connected: "ተገናኝቷል",
+  Connect: "አገናኝ",
+  "Link your account to practise from the bot and to reset your password through Telegram. Open the bot and send:":
+    "ከቦቱ ለመለማመድና የይለፍ ቃልዎን በቴሌግራም ለመቀየር መለያዎን ያገናኙ። ቦቱን ከፍተው ይህንን ይላኩ፦",
+  "Open {handle}": "{handle}ን ክፈት",
+  Community: "ማኅበረሰብ",
+  "Our Telegram channel": "የቴሌግራም ቻናላችን",
+  "Updates, exam tips and announcements": "ዜናዎች፣ የፈተና ምክሮችና ማስታወቂያዎች",
+  "Daily mass practice group": "የዕለት የጋራ ልምምድ ቡድን",
+  "Subscribers only. Link the bot first so your join request is approved.":
+    "ለተመዘገቡ ብቻ። የመቀላቀል ጥያቄዎ እንዲፀድቅ መጀመሪያ ቦቱን ያገናኙ።",
+  Settings: "ቅንብሮች",
+  "Made with": "በ",
+  "by Dawit and Betsinat": "ዳዊት እና ብጽናት ያዘጋጁት",
+  "{n} days to go": "{n} ቀናት ቀርተዋል",
+  "Exam date has passed": "የፈተናው ቀን አልፏል",
+  "From your Grade {n} textbooks": "ከ{n}ኛ ክፍል መጽሐፍትዎ",
+  "Summaries and formulas": "ማጠቃለያዎችና ቀመሮች",
+  "Your week at a glance": "የሳምንቱ እቅድዎ",
+  "Accuracy and weak units": "ትክክለኛነትና ደካማ ምዕራፎች",
   Language: "ቋንቋ",
   "Log out": "ውጣ",
 }

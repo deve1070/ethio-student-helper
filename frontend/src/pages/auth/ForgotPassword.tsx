@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { GraduationCap } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Field, PasswordInput, TextInput, ErrorBanner } from "../../components/ui/Primitives"
 import { useAuth } from "../../lib/auth"
 import { auth as authApi, errorMessage } from "../../lib/api"
+import { usePublicConfig } from "../../lib/publicConfig"
 
 type Step = "identifier" | "no_link" | "code"
 
@@ -15,13 +16,10 @@ export function ForgotPasswordPage() {
   const [identifier, setIdentifier] = useState("")
   const [code, setCode] = useState("")
   const [newPassword, setNewPassword] = useState("")
-  const [groupUrl, setGroupUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    authApi.publicConfig().then((c) => setGroupUrl(c.telegram_group_url)).catch(() => {})
-  }, [])
+  const channelUrl = usePublicConfig()?.telegram_channel_url ?? null
 
   async function onRequest(e: React.FormEvent) {
     e.preventDefault()
@@ -98,12 +96,12 @@ export function ForgotPasswordPage() {
             </p>
             <p className="text-sm text-zinc-700">
               Then come back and try again. If you don't remember your password at all and have never
-              linked Telegram, we can't recover it automatically{groupUrl ? " - message us" : "."}
-              {groupUrl && (
+              linked Telegram, we can't recover it automatically{channelUrl ? " - reach us" : "."}
+              {channelUrl && (
                 <>
-                  {" "}in our{" "}
-                  <a href={groupUrl} target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">
-                    Telegram group
+                  {" "}through our{" "}
+                  <a href={channelUrl} target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">
+                    Telegram channel
                   </a>
                   {" "}for help.
                 </>

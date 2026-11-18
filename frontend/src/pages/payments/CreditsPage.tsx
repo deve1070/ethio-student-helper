@@ -5,9 +5,11 @@ import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
 import { ErrorBanner, FullPageSpinner, ProgressBar } from "../../components/ui/Primitives"
 import { errorMessage, payments, type EntitlementResponse } from "../../lib/api"
+import { usePublicConfig } from "../../lib/publicConfig"
 
 export function CreditsPage() {
   const navigate = useNavigate()
+  const price = usePublicConfig()?.subscription_price_etb
   const [data, setData] = useState<EntitlementResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -58,7 +60,7 @@ export function CreditsPage() {
 
       {!data.has_active_subscription && (
         <Button size="lg" fullWidth onClick={() => navigate("/subscribe")}>
-          Subscribe for 300 ETB/year
+          {price ? `Subscribe for ${price} ETB/year` : "Subscribe"}
         </Button>
       )}
 

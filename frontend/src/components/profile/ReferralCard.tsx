@@ -51,7 +51,7 @@ export function ReferralCard({ code }: { code: string }) {
     }
   }
 
-  const reward = summary?.reward_per_referral_etb ?? 50
+  const reward = summary?.reward_per_referral_etb
   const hasPending = (summary?.pending_etb ?? 0) > 0
 
   return (
@@ -61,10 +61,11 @@ export function ReferralCard({ code }: { code: string }) {
           <Users className="size-4 text-brand-600" aria-hidden />
           <p className="text-sm font-semibold text-zinc-900">Refer & earn</p>
         </div>
-        <Badge tone="brand">{reward} ETB / friend</Badge>
+        {reward !== undefined && <Badge tone="brand">{reward} ETB / friend</Badge>}
       </div>
       <p className="text-sm text-zinc-600">
-        Share your code. When a friend signs up with it and becomes a paying student, you earn {reward} ETB.
+        Share your code. When a friend signs up with it and becomes a paying student, you earn{" "}
+        {reward !== undefined ? `${reward} ETB` : "a reward"}.
       </p>
       <button
         onClick={copyCode}
