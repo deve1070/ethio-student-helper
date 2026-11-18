@@ -34,7 +34,12 @@ stub("auth.telegram_notify", send_text=lambda db, user, text: referral_sent.appe
 vision_state = {"response": json.dumps({"readable": False, "amount_etb": None, "transaction_id": None})}
 
 
-def fake_make_gemini_vision_call(model_id, prompt):
+vision_budget: dict = {}
+
+
+def fake_make_gemini_vision_call(model_id, prompt, **budget):
+    vision_budget.update(budget)
+
     def call(jpg, note):
         return vision_state["response"]
     return call
@@ -134,6 +139,7 @@ r = c.post(
     files={"receipt": ("r.jpg", JPEG, "image/jpeg")},
 )
 check("auto-approve status 200", r.status_code == 200)
+check("receipt check has a small time budget", vision_budget.get("timeout", 999) <= 60 and vision_budget.get("retry_attempts", 99) <= 2)
 body = r.json()
 check("auto-approve completed", body["status"] == "completed")
 payment_id_auto = body["payment_id"]

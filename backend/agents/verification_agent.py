@@ -38,7 +38,9 @@ class VerificationAgent:
         resolution (exams/store.py's solve_question_crosschecked).
         """
         logger.info("Initializing VerificationAgent with a Gemini LLM client...")
-        self.model = GeminiLLMClient(temperature=0, max_tokens=1000)
+        # A small time budget: the student is waiting, and the answer is already written. If Gemini
+        # is overloaded the check is skipped (status ERROR) and the answer is sent as it is.
+        self.model = GeminiLLMClient(temperature=0, max_tokens=1000, timeout=20, retry_attempts=2, retry_max_wait=5)
 
     def generate_prompt(self, answer: str, context: str, question: str | None) -> str:
         question_block = f"QUESTION:\n{question}\n\n" if question else ""

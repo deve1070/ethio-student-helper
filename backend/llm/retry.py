@@ -30,14 +30,10 @@ except ImportError:  # keep this module importable without the SDK
     class RateLimitError(Exception): ...
     class APIConnectionError(Exception): ...
 
-try:  # google-api-core's exception types, raised by langchain_google_genai
-    from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
-except ImportError:  # keep this module importable without the google SDK
-    class ResourceExhausted(Exception): ...
-    class ServiceUnavailable(Exception): ...
+from llm.gemini_rest import GeminiRateLimitError, GeminiUnavailableError
 
-RATE_LIMIT_ERRORS = (RateLimitError, ResourceExhausted)
-CONNECTION_ERRORS = (APIConnectionError, ServiceUnavailable)
+RATE_LIMIT_ERRORS = (RateLimitError, GeminiRateLimitError)
+CONNECTION_ERRORS = (APIConnectionError, GeminiUnavailableError)
 
 
 class LLMUnavailableError(RuntimeError):

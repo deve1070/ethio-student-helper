@@ -7,12 +7,22 @@ account as of 2026-10-21, see the esh-extraction-gemini-vision memory).
 """
 import base64
 
-from config.settings import settings
-from llm.gemini_content import content_to_text as _content_to_text
+from llm.gemini_rest import GeminiREST
+from llm.retry import invoke_with_retry
 
 
-def make_gemini_vision_call(model_id: str, system_prompt: str, max_output_tokens: int = 12000):
+def make_gemini_vision_call(
+    model_id: str,
+    system_prompt: str,
+    max_output_tokens: int = 12000,
+    timeout: float = 180.0,
+    retry_attempts: int = 5,
+):
     """Returns call(jpeg_bytes, note) -> response text.
+
+    timeout bounds one request and retry_attempts the retrying (llm/retry.py). The defaults suit the
+    offline exam tools, where a dense page legitimately takes a long time; a student-facing caller
+    (receipt checking) passes much smaller values.
 
     max_output_tokens defaults to 12000, not a smaller number: Gemini 3.x models spend part of the
     budget on hidden reasoning before the visible answer, and a smaller ceiling was seen in real
@@ -40,21 +50,17 @@ def make_gemini_vision_call(model_id: str, system_prompt: str, max_output_tokens
     from io import BytesIO
 
     import numpy as np
-    from langchain_google_genai import ChatGoogleGenerativeAI
     from PIL import Image
 
-    llm = ChatGoogleGenerativeAI(
-        model=model_id, google_api_key=settings.GEMINI_API_KEY, temperature=0,
-        max_output_tokens=max_output_tokens,
-    )
+    llm = GeminiREST(model_id, temperature=0, max_output_tokens=max_output_tokens, timeout=timeout)
 
     def _invoke(jpg: bytes, note: str) -> tuple[str, bool]:
         content = [
             {"type": "text", "text": system_prompt + "\n\n" + note},
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpg).decode()}},
         ]
-        r = llm.invoke([{"role": "user", "content": content}])
-        text = _content_to_text(r.content)
+        r = invoke_with_retry(llm, [{"role": "user", "content": content}], attempts=retry_attempts)
+        text = r.content
         blocked = not text and r.response_metadata.get("finish_reason") == "RECITATION"
         return text, blocked
 

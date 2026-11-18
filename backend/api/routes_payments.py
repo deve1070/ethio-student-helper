@@ -77,7 +77,9 @@ def submit_receipt(
     # Automatic check first; never guessed past what the photo actually shows (see
     # payments/receipt_verification.py) - anything it isn't confident about goes to an admin.
     try:
-        vision_call = make_gemini_vision_call(RECEIPT_MODEL_ID, RECEIPT_PROMPT)
+        # bounded so the student waits under two minutes at worst; a check that can't finish sends the
+        # receipt to an admin, the same as an unreadable photo
+        vision_call = make_gemini_vision_call(RECEIPT_MODEL_ID, RECEIPT_PROMPT, timeout=45, retry_attempts=2)
         extracted = extract_receipt_data(vision_call, photo_bytes)
         auto_approved, note = verify_receipt(extracted, transaction_id, amount_etb)
     except Exception as e:  # noqa: BLE001 - a broken vision call is exactly as inconclusive as a bad read
