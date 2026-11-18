@@ -164,6 +164,10 @@ export function ProfilePage() {
         <LogOut className="size-4" aria-hidden /> {t("Log out")}
       </Button>
 
+      <Link to="/delete-account" className="text-center text-sm font-medium text-red-600 hover:text-red-700">
+        {t("Delete account")}
+      </Link>
+
       <p className="flex items-center justify-center gap-1.5 pb-2 text-xs text-zinc-400">
         {t("Ethiopian Student Helper")} · {t("Made with")} <Heart className="size-3 fill-current text-rose-400" aria-hidden />{" "}
         {t("by Dawit and Betsinat")}

@@ -11,6 +11,16 @@ export function LoginPage() {
   const { login } = useAuth()
   const { t } = useI18n()
   const navigate = useNavigate()
+  // set by the delete-account page just before logging out; shown once
+  const [accountDeleted] = useState(() => {
+    try {
+      const set = sessionStorage.getItem("esh_account_deleted") === "1"
+      sessionStorage.removeItem("esh_account_deleted")
+      return set
+    } catch {
+      return false
+    }
+  })
   const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -47,6 +57,9 @@ export function LoginPage() {
         </div>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          {accountDeleted && !error && (
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{t("Your account has been deleted.")}</p>
+          )}
           {error && <ErrorBanner message={error} />}
           <Field label={t("Phone or email")} htmlFor="identifier">
             <TextInput

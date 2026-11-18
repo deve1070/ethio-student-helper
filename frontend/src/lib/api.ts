@@ -119,6 +119,7 @@ export const auth = {
   streams: () => get<StreamSubjects>("/v1/auth/streams"),
   me: () => get<Profile>("/v1/auth/me"),
   updateMe: (body: UpdateProfileBody) => patch<Profile>("/v1/auth/me", body),
+  deleteAccount: (password: string) => post<{ deleted: boolean }>("/v1/auth/me/delete", { password }),
   requestPasswordReset: (identifier: string) =>
     post<PasswordResetRequestResponse>("/v1/auth/password-reset/request", { identifier }),
   confirmPasswordReset: (identifier: string, code: string, new_password: string) =>

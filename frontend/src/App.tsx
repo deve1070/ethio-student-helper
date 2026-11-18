@@ -28,6 +28,7 @@ const EsslceSummaryPage = lazy(() => import("./pages/esslce/EsslceSummary").then
 const CreditsPage = lazy(() => import("./pages/payments/CreditsPage").then((m) => ({ default: m.CreditsPage })))
 const BuyPage = lazy(() => import("./pages/payments/BuyPage").then((m) => ({ default: m.BuyPage })))
 const ProfilePage = lazy(() => import("./pages/Profile").then((m) => ({ default: m.ProfilePage })))
+const DeleteAccountPage = lazy(() => import("./pages/account/DeleteAccountPage").then((m) => ({ default: m.DeleteAccountPage })))
 const StudyPlanPage = lazy(() => import("./pages/studyplan/StudyPlanPage").then((m) => ({ default: m.StudyPlanPage })))
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -132,6 +133,7 @@ export default function App() {
         <Route path="/subscribe" element={<BuyPage />} />
 
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/delete-account" element={<DeleteAccountPage />} />
         <Route path="/study-plan" element={<StudyPlanPage />} />
       </Route>
 

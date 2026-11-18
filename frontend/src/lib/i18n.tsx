@@ -116,6 +116,23 @@ const AM: Record<string, string> = {
   "Your study plan is ready. Let's get started.": "የጥናት እቅድዎ ዝግጁ ነው። እንጀምር።",
   "Go to Dashboard": "ወደ መነሻ ገጽ",
 
+  // account deletion
+  "Delete account": "መለያ ሰርዝ",
+  "Delete your account permanently": "መለያዎን በቋሚነት ይሰርዙ",
+  "Your profile, progress, answers, study plans and Telegram link are deleted. This can't be undone.":
+    "መገለጫዎ፣ እድገትዎ፣ መልሶችዎ፣ የጥናት እቅዶችዎና የቴሌግራም ግንኙነትዎ ይሰረዛሉ። ይህ ሊቀለበስ አይችልም።",
+  "An active subscription ends with the account and is not refunded.": "ንቁ ምዝገባ ከመለያው ጋር ያበቃል፤ ገንዘቡም አይመለስም።",
+  "You'll be removed from the daily practice group.": "ከዕለታዊ የልምምድ ቡድኑ ይወጣሉ።",
+  "Records of payments you made are kept for our accounts, without your name or receipt photos.":
+    "የከፈሏቸው ክፍያዎች መዝገብ ያለ ስምዎና ያለ ደረሰኝ ፎቶ ለሂሳብ ይቀመጣል።",
+  "If you have referral earnings, withdraw them first; deleting is blocked until they're paid.":
+    "የጋባዥ ገቢ ካለዎት መጀመሪያ ያውጡት፤ እስኪከፈል ድረስ መሰረዝ አይቻልም።",
+  "Your password": "የይለፍ ቃልዎ",
+  "Type {word} to confirm": "ለማረጋገጥ {word} ብለው ይጻፉ",
+  "Delete my account": "መለያዬን ሰርዝ",
+  Cancel: "ተወው",
+  "Your account has been deleted.": "መለያዎ ተሰርዟል።",
+
   // profile
   Edit: "አስተካክል",
   Student: "ተማሪ",
