@@ -95,6 +95,16 @@ def exam_solve(
     return response.json()
 
 
+def public_config() -> dict:
+    """Price, payment accounts and public links; no login needed."""
+    try:
+        response = httpx.get(f"{BACKEND_BASE_URL}/v1/auth/public-config", timeout=15)
+    except httpx.HTTPError as e:
+        raise BackendError(503, str(e))
+    _raise_for_status(response)
+    return response.json()
+
+
 def get_entitlement(telegram_user_id: int) -> dict:
     response = httpx.get(
         f"{BACKEND_BASE_URL}/v1/me/entitlement",

@@ -195,6 +195,9 @@ Every variable is documented in `backend/.env.example`. The important ones:
 | `TELEGRAM_BOT_TOKEN`, `BOT_INTERNAL_TOKEN` | The bot, and its shared secret with the backend |
 | `TELEGRAM_PRIVATE_GROUP_ID`, `MASS_CHALLENGE_*` | The daily practice (an id of 0 disables it) |
 | `BOT_DATA_DIR` | Where the bot keeps its state file |
+| `SUBSCRIPTION_PRICE_ETB`, `PAYMENT_TELEBIRR_NUMBER`, `PAYMENT_CBE_ACCOUNT` | The price and where students send it; set on the backend, read by the app and the bot |
+| `REFERRAL_REWARD_ETB` | What a referral earns; a change applies to later referrals only |
+| `TELEGRAM_CHANNEL_URL` | The public channel students are invited to |
 
 ## Tests
 
@@ -231,3 +234,7 @@ Pre-launch. Known gaps:
 - There is no Flutter client yet; the PWA is the mobile app for now.
 
 More design detail is in `docs/dev_plans/` and `docs/data-model-api.md`.
+
+## Authors
+
+Built by Dawit and Betsinat.

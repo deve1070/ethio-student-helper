@@ -72,7 +72,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 R.notify_admins_payout_request = AN.notify_admins_payout_request
 
-student = M.User(id=uuid.uuid4(), full_name="Sara", phone_number="0911000000", referral_paid_count=3, is_admin=False)
+student = M.User(id=uuid.uuid4(), full_name="Sara", phone_number="0911000000", referral_paid_count=3, referral_earned_etb=150, is_admin=False)
 admin = M.User(id=uuid.uuid4(), full_name="Admin", is_admin=True)
 db.add_all([student, admin])
 db.commit()
@@ -145,6 +145,7 @@ r = client.post("/v1/referrals/payouts", json={"method": "telebirr", "account_nu
 check("nothing left to withdraw", r.status_code == 400)
 
 student.referral_paid_count = 4
+student.referral_earned_etb = 200
 db.commit()
 check("a new referral makes 50 available", client.get("/v1/referrals/payouts").json()["available_etb"] == 50)
 

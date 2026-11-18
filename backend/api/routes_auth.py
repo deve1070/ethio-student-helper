@@ -243,19 +243,25 @@ def confirm_password_reset(
 
 
 class PublicConfigResponse(BaseModel):
-    telegram_group_url: str | None
+    telegram_channel_url: str | None
     telegram_bot_url: str | None
+    subscription_price_etb: float
+    referral_reward_etb: float
+    payment_telebirr_number: str
+    payment_cbe_account: str
 
 
 @router.get("/public-config", response_model=PublicConfigResponse)
 def public_config() -> PublicConfigResponse:
-    """Unauthenticated - the forgot-password page needs these links before a student has any session
-    at all; ProfileResponse (below) serves the same two settings to the logged-in Profile page, so
-    there's exactly one definition of each (settings.TELEGRAM_GROUP_URL/TELEGRAM_BOT_URL), just two
-    ways of reading them depending on whether a session exists yet."""
+    """Unauthenticated: the forgot-password page needs the links before a student has a session, and
+    the bot reads the price and payment accounts here so they are set in one place (config/settings.py)."""
     return PublicConfigResponse(
-        telegram_group_url=settings.TELEGRAM_GROUP_URL or None,
+        telegram_channel_url=settings.TELEGRAM_CHANNEL_URL or None,
         telegram_bot_url=settings.TELEGRAM_BOT_URL or None,
+        subscription_price_etb=settings.SUBSCRIPTION_PRICE_ETB,
+        referral_reward_etb=settings.REFERRAL_REWARD_ETB,
+        payment_telebirr_number=settings.PAYMENT_TELEBIRR_NUMBER,
+        payment_cbe_account=settings.PAYMENT_CBE_ACCOUNT,
     )
 
 
@@ -283,7 +289,7 @@ class ProfileResponse(BaseModel):
     daily_goal_minutes: int | None
     onboarding_completed: bool
     referral_code: str
-    telegram_group_url: str | None
+    telegram_channel_url: str | None
     telegram_bot_url: str | None
     private_group_url: str | None  # the subscriber-only practice group; None unless subscribed
     telegram_linked: bool
@@ -302,7 +308,7 @@ def _profile_response(db: Session, user: User) -> ProfileResponse:
         daily_goal_minutes=user.daily_goal_minutes,
         onboarding_completed=user.onboarding_completed_at is not None,
         referral_code=user.referral_code,
-        telegram_group_url=settings.TELEGRAM_GROUP_URL or None,
+        telegram_channel_url=settings.TELEGRAM_CHANNEL_URL or None,
         telegram_bot_url=settings.TELEGRAM_BOT_URL or None,
         private_group_url=(
             settings.TELEGRAM_PRIVATE_GROUP_URL or None if has_active_subscription(db, user.id) else None

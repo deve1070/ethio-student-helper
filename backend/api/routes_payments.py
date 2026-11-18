@@ -28,8 +28,8 @@ router = APIRouter(prefix="/v1", tags=["payments"])
 
 # The one plan this app sells: a full year of unlimited AI access for a single payment. Kept as
 # an explicit id/amount pair (not a bare constant) so a second plan could be added later without
-# submit_receipt's `plan` field becoming a magic implicit default.
-SUBSCRIPTION_PLAN = {"id": "yearly", "amount_etb": 300.0}
+# submit_receipt's `plan` field becoming a magic implicit default. The price is a setting.
+SUBSCRIPTION_PLAN = {"id": "yearly", "amount_etb": settings.SUBSCRIPTION_PRICE_ETB}
 
 
 class SubmitReceiptResponse(BaseModel):

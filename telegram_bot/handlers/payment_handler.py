@@ -22,26 +22,21 @@ from telegram.ext import ContextTypes
 from telegram_bot import api_client
 from telegram_bot.api_client import BackendError
 
-# Duplicated from backend/api/routes_payments.py's SUBSCRIPTION_PLAN deliberately - this is
-# display text for a different process (the bot) reached only over HTTP; the backend stays the
-# only place that actually prices or validates a plan.
-SUBSCRIPTION_AMOUNT_ETB = 300.0
 
-# The business's own receiving accounts - public by design (every student needs these to pay),
-# not a secret, so plain module constants rather than something from settings/.env.
-TELEBIRR_NUMBER = "0909575318"
-CBE_ACCOUNT_NUMBER = "1000198942948"
 
-SUBSCRIBE_INSTRUCTIONS = (
-    f"One payment, a full year of unlimited access:\n"
-    f"1. Send {SUBSCRIPTION_AMOUNT_ETB:.0f} ETB to either:\n"
-    f"   • Telebirr: {TELEBIRR_NUMBER}\n"
-    f"   • CBE: {CBE_ACCOUNT_NUMBER}\n"
-    f"2. Send a photo of the receipt here with this exact caption:\n"
-    f"   /submit_receipt <the transaction id from your receipt>\n\n"
-    "Most receipts are verified automatically within seconds; if the photo isn't clear "
-    "enough to read, an admin will check it manually instead."
-)
+def subscribe_instructions(config: dict) -> str:
+    """The price and receiving accounts come from the backend's /v1/auth/public-config, the one place
+    they are set, so a price change never needs a bot release."""
+    return (
+        "One payment, a full year of unlimited access:\n"
+        f"1. Send {config['subscription_price_etb']:g} ETB to either:\n"
+        f"   • Telebirr: {config['payment_telebirr_number']}\n"
+        f"   • CBE: {config['payment_cbe_account']}\n"
+        "2. Send a photo of the receipt here with this exact caption:\n"
+        "   /submit_receipt <the transaction id from your receipt>\n\n"
+        "Most receipts are verified automatically within seconds; if the photo isn't clear "
+        "enough to read, an admin will check it manually instead."
+    )
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,7 +72,12 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not api_client.is_logged_in(telegram_user_id):
         await update.effective_message.reply_text("Please /login first with your phone/email and password.")
         return
-    await update.effective_message.reply_text(SUBSCRIBE_INSTRUCTIONS)
+    try:
+        config = await asyncio.to_thread(api_client.public_config)
+    except BackendError:
+        await update.effective_message.reply_text("Couldn't load the payment details right now — try again shortly.")
+        return
+    await update.effective_message.reply_text(subscribe_instructions(config))
 
 
 async def receipt_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

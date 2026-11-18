@@ -226,6 +226,7 @@ r = c.post(
 check("referred student's first payment auto-approved", r.json()["status"] == "completed")
 db.expire_all()
 check("referrer's count is now 1", db.get(M.User, referrer.id).referral_paid_count == 1)
+check("referrer earned the configured reward", float(db.get(M.User, referrer.id).referral_earned_etb) == R.settings.REFERRAL_REWARD_ETB)
 check("referrer was notified on Telegram", any(uid == referrer.id for uid, _ in referral_sent))
 
 vision_state["response"] = json.dumps({"readable": False, "amount_etb": None, "transaction_id": None})

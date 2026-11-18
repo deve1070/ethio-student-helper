@@ -14,10 +14,11 @@ from sqlalchemy.orm import Session
 from auth.dependencies import get_current_user, require_admin
 from auth.identifiers import normalize_phone
 from auth.telegram_notify import send_text
+from config.settings import settings
 from db.models import ReferralPayout, User
 from db.session import get_db
 from payments.admin_notify import notify_admins_payout_request, payout_request_text
-from payments.referral import REFERRAL_REWARD_ETB, referral_balance
+from payments.referral import referral_balance
 from utils.logging import logger
 
 router = APIRouter(prefix="/v1/referrals", tags=["referrals"])
@@ -71,7 +72,7 @@ def _summary(db: Session, user: User) -> PayoutSummary:
         .all()
     )
     return PayoutSummary(
-        reward_per_referral_etb=REFERRAL_REWARD_ETB,
+        reward_per_referral_etb=settings.REFERRAL_REWARD_ETB,
         paid_referrals=user.referral_paid_count,
         earned_etb=balance["earned"],
         paid_etb=balance["paid"],

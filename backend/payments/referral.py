@@ -7,13 +7,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from auth.telegram_notify import send_text
+from config.settings import settings
 from db.models import Payment, ReferralPayout, User
-
-# The one canonical place this business constant lives - api/routes_auth.py's ProfileResponse
-# computes each student's displayed earned total from this, so the "50" never gets duplicated
-# into the frontend. Paid out manually (Telebirr etc.), same as payment approval - this constant
-# only controls what's DISPLAYED as owed, not an automated payout.
-REFERRAL_REWARD_ETB = 50.0
 
 
 def credit_referral_if_first_payment(db: Session, payment: Payment) -> None:
@@ -41,6 +36,7 @@ def credit_referral_if_first_payment(db: Session, payment: Payment) -> None:
     if referrer is None:
         return
     referrer.referral_paid_count += 1
+    referrer.referral_earned_etb = float(referrer.referral_earned_etb or 0) + settings.REFERRAL_REWARD_ETB
     send_text(
         db,
         referrer,
@@ -59,7 +55,7 @@ def referral_balance(db: Session, user: User) -> dict[str, float]:
         .group_by(ReferralPayout.status)
         .all()
     )
-    earned = user.referral_paid_count * REFERRAL_REWARD_ETB
+    earned = float(user.referral_earned_etb or 0)
     paid = float(totals.get("paid", 0))
     pending = float(totals.get("pending", 0))
     return {"earned": earned, "paid": paid, "pending": pending, "available": max(earned - paid - pending, 0.0)}

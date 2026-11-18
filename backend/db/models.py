@@ -76,6 +76,9 @@ class User(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     referral_paid_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Total referral rewards earned, each added at the reward in force when it was earned, so changing
+    # settings.REFERRAL_REWARD_ETB later never rewrites what a student already earned.
+    referral_earned_etb: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

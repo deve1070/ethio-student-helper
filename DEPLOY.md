@@ -69,7 +69,10 @@ accident:
   `BOT_INTERNAL_TOKEN` (generate one - must match the bot service's value
   exactly), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_PRIVATE_GROUP_ID`, `TELEGRAM_PRIVATE_GROUP_URL`
   (the subscriber group's invite link, shown on the Profile page to subscribers only),
-  `ENVIRONMENT=production`,
+  `ENVIRONMENT=production`. Optional, with working defaults: `TELEGRAM_CHANNEL_URL` (the public
+  channel), `SUBSCRIPTION_PRICE_ETB`, `PAYMENT_TELEBIRR_NUMBER`, `PAYMENT_CBE_ACCOUNT`,
+  `REFERRAL_REWARD_ETB`. The app and the bot read the price and accounts from the backend, so a
+  change here needs only a backend redeploy.
   `ALLOWED_ORIGINS` (fill in once you have the Vercel URL from step 4).
 - Generate a public domain for this service (Settings → Networking) - you'll
   need its URL for both the frontend's `VITE_API_BASE_URL` and the bot's
@@ -93,7 +96,7 @@ accident:
 - Settings → Resource limits: much lighter than the backend - measured locally
   at ~56MB RSS idle, no embedding model, no torch. 0.5 vCPU / 0.5GB is generous.
 - Variables: `TELEGRAM_BOT_TOKEN`, `BOT_INTERNAL_TOKEN` (same value as the
-  backend's), `TELEGRAM_GROUP_URL`, `TELEGRAM_PRIVATE_GROUP_ID` (same value as
+  backend's), `TELEGRAM_CHANNEL_URL` (optional), `TELEGRAM_PRIVATE_GROUP_ID` (same value as
   the backend's), `MASS_CHALLENGE_TIME`, `MASS_CHALLENGE_HEADSUP_MINUTES`, `MASS_CHALLENGE_NUDGE_MINUTES`,
   `MASS_CHALLENGE_NATURAL_TOPIC_ID`, `MASS_CHALLENGE_SOCIAL_TOPIC_ID`, `BOT_DATA_DIR=/data`, and
   `BACKEND_BASE_URL` = the backend service's public URL from step 3a (Railway's

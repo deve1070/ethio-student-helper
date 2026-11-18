@@ -43,12 +43,20 @@ class Settings(BaseSettings):
     # receipt-needs-review notification straight to an admin's Telegram chat.
     TELEGRAM_BOT_TOKEN: str = ""
     RECEIPTS_DIR: str = "receipts"
+    # What a year's subscription costs, and the two accounts students send it to. The web app and
+    # the bot read all three from /v1/auth/public-config, so changing them here changes them everywhere.
+    SUBSCRIPTION_PRICE_ETB: float = 300.0
+    PAYMENT_TELEBIRR_NUMBER: str = "0909575318"
+    PAYMENT_CBE_ACCOUNT: str = "1000198942948"
+    # What a student earns when someone they referred makes a first payment. Each reward is recorded
+    # when it is earned (payments/referral.py), so changing this affects only later referrals.
+    REFERRAL_REWARD_ETB: float = 50.0
 
-    # The student-facing Telegram group and bot, for Help/Contact and account-linking (both public
-    # links, not secrets - safe to default here rather than require every environment to set them).
-    # api/routes_auth.py surfaces both through ProfileResponse and /public-config;
-    # telegram_bot/bot.py's /help reads the same TELEGRAM_GROUP_URL from this shared .env.
-    TELEGRAM_GROUP_URL: str = "https://t.me/ethiopian_student_helper"
+    # The public Telegram channel every student is invited to, and the bot (both public links). The
+    # subscriber-only practice group is TELEGRAM_PRIVATE_GROUP_URL below and is never shown to
+    # students who haven't paid. api/routes_auth.py serves both through ProfileResponse and
+    # /public-config; telegram_bot/config.py reads the same TELEGRAM_CHANNEL_URL for /help.
+    TELEGRAM_CHANNEL_URL: str = "https://t.me/ethio_student_helper"
     TELEGRAM_BOT_URL: str = "https://t.me/esh_bot"
 
     # The subscriber-only private group the daily mass-practice event runs in (telegram_bot/

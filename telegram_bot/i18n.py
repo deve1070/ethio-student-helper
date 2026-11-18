@@ -26,7 +26,8 @@ AM = {
         "ጠቃሚ ምክር፦ በመተግበሪያው ቢገቡም አንድ ጊዜ /login ያድርጉ — ይህን ውይይት ከመለያዎ ጋር ያገናኛል፣ "
         "የይለፍ ቃልዎን ቢረሱም ከመተግበሪያው ዳግም ለማስጀመር የሚያስችለውም ይህ ነው።"
     ),
-    "Need help or have a question? Join our student group:\n{url}": "እገዛ ይፈልጋሉ ወይም ጥያቄ አለዎት? የተማሪዎች ቡድናችንን ይቀላቀሉ፦\n{url}",
+    "Follow our channel for updates and study tips:\n{url}": "ለዜናና የጥናት ምክሮች ቻናላችንን ይከታተሉ፦\n{url}",
+    "Developed by Dawit and Betsinat.": "ያዘጋጁት ዳዊት እና ብጽናት ናቸው።",
     "Having trouble? Use /login to link your account, or ask your question with /explain.":
         "ችግር አጋጠመዎት? መለያዎን ለማገናኘት /login ይጠቀሙ፣ ወይም ጥያቄዎን በ/explain ይጠይቁ።",
     "Choose your language:": "ቋንቋ ይምረጡ፦",

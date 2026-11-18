@@ -9,8 +9,9 @@ load_dotenv(Path(__file__).resolve().parent.parent / "backend" / ".env")
 
 BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://localhost:8000")
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-# Same public setting the backend reads for its Profile page link (config/settings.py).
-TELEGRAM_GROUP_URL = os.environ.get("TELEGRAM_GROUP_URL", "https://t.me/ethiopian_student_helper")
+# The public channel every student is invited to; the same setting the backend reads for the
+# Profile page (config/settings.py). The subscriber-only group is never offered here.
+TELEGRAM_CHANNEL_URL = os.environ.get("TELEGRAM_CHANNEL_URL", "https://t.me/ethio_student_helper")
 
 # Daily mass-practice event (telegram_bot/mass_challenge.py). Same shared secret the backend
 # checks in auth/dependencies.py's require_bot_internal_token - MUST match BOT_INTERNAL_TOKEN in

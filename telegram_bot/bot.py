@@ -16,7 +16,7 @@ from telegram.ext import (
 from telegram_bot import mass_challenge, reminders, weekly_report
 from telegram_bot.i18n import tr
 from telegram_bot import store as bot_store
-from telegram_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_URL
+from telegram_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_URL
 from telegram_bot.handlers.auth_handler import login_command, login_text_handler, logout_command
 from telegram_bot.handlers.esslce_handler import (
     esslce_callback,
@@ -68,7 +68,7 @@ COMMANDS = [
     BotCommand("catchup", "Answer today's mass practice privately"),
     BotCommand("status", "Check your subscription status"),
     BotCommand("subscribe", "Subscribe for a year of unlimited access"),
-    BotCommand("help", "Get help or join our student group"),
+    BotCommand("help", "Help, our channel and the developers"),
     BotCommand("language", "English or Amharic / ቋንቋ"),
 ]
 
@@ -76,15 +76,14 @@ COMMANDS = [
 # matching slash command already calls - menu_callback (also below) is the one place that maps
 # a button tap to that function, so adding a command here never means writing its logic twice.
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Also reachable as the main menu's "Help" button - see api/routes_auth.py's ProfileResponse,
-    which surfaces this same TELEGRAM_GROUP_URL on the app's Profile page, for the one shared place
-    this link is kept (config/settings.py / this bot's own config.py, both reading the same .env)."""
+    """Also reachable as the main menu's "Help" button. The channel link is the same setting the
+    app's Profile page shows (TELEGRAM_CHANNEL_URL)."""
     uid = update.effective_user.id
-    if TELEGRAM_GROUP_URL:
-        text = tr(uid, "Need help or have a question? Join our student group:\n{url}", url=TELEGRAM_GROUP_URL)
-    else:
-        text = tr(uid, "Having trouble? Use /login to link your account, or ask your question with /explain.")
-    await update.effective_message.reply_text(text)
+    parts = [tr(uid, "Having trouble? Use /login to link your account, or ask your question with /explain.")]
+    if TELEGRAM_CHANNEL_URL:
+        parts.append(tr(uid, "Follow our channel for updates and study tips:\n{url}", url=TELEGRAM_CHANNEL_URL))
+    parts.append(tr(uid, "Developed by Dawit and Betsinat."))
+    await update.effective_message.reply_text("\n\n".join(parts))
 
 
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
