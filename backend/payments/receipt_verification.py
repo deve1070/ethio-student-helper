@@ -76,3 +76,33 @@ def verify_receipt(
         return False, f"amount mismatch: receipt shows {amount} ETB, expected {expected_amount_etb} ETB"
 
     return True, "transaction id and amount matched the receipt"
+
+
+RECEIPT_MAX_SIDE_PX = 2000  # enough to read any receipt; a 12-megapixel phone photo is shrunk to this
+
+
+def receipt_to_jpeg(data: bytes) -> bytes:
+    """Any image a phone produces (a camera JPEG, a PNG or WebP screenshot from the gallery) as one
+    JPEG, its longer side at most RECEIPT_MAX_SIDE_PX, turned upright from the camera's rotation tag.
+    Receipts are stored and read as JPEG, so every one is converted the same way. ValueError if the
+    bytes are not an image."""
+    from io import BytesIO
+
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    try:
+        img = Image.open(BytesIO(data))
+        img.load()
+    except (UnidentifiedImageError, OSError) as e:
+        raise ValueError("That file isn't a photo. Upload a picture or screenshot of your receipt.") from e
+    img = ImageOps.exif_transpose(img)
+    if img.mode != "RGB":
+        # a transparent screenshot area becomes white, not black
+        background = Image.new("RGB", img.size, "white")
+        rgba = img.convert("RGBA")
+        background.paste(rgba, mask=rgba.split()[3])
+        img = background
+    img.thumbnail((RECEIPT_MAX_SIDE_PX, RECEIPT_MAX_SIDE_PX))
+    out = BytesIO()
+    img.save(out, format="JPEG", quality=88)
+    return out.getvalue()

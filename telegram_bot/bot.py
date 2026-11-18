@@ -221,7 +221,8 @@ def build_application() -> Application:
     # every photo update, since each one checks its OWN caption prefix and silently no-ops on
     # the other's - PTB only runs one handler per group by default, so two handlers that both
     # match filters.PHOTO need separate groups to both get a chance to run.
-    app.add_handler(MessageHandler(filters.PHOTO, receipt_photo_handler), group=1)
+    # filters.Document.IMAGE too: a receipt screenshot sent as a file (uncompressed) arrives as a document.
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, receipt_photo_handler), group=1)
     # free text is only ever acted on while a student is mid-"Ask about this" chat (esslce_text_handler
     # checks session.asking_question_id itself), mid-guided /exam flow (exam_text_handler), mid-guided
     # /login flow (login_text_handler), or mid-guided /explain flow (explain_text_handler) - each

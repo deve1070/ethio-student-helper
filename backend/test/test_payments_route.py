@@ -58,6 +58,23 @@ M.Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine, autoflush=False)
 
 import api.routes_payments as R
+from io import BytesIO
+
+from PIL import Image
+
+# Receipt uploads are faked here so a test run can never write to the real storage bucket; uploaded
+# records what would have been stored.
+uploaded: list = []
+R.storage.upload = lambda bucket, path, data, content_type="image/jpeg": uploaded.append((bucket, path, data))
+
+
+def _image(fmt: str, mode: str = "RGB") -> bytes:
+    out = BytesIO()
+    Image.new(mode, (40, 30), "white").save(out, format=fmt)
+    return out.getvalue()
+
+
+JPEG = _image("JPEG")
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
@@ -114,7 +131,7 @@ vision_state["response"] = json.dumps(
 r = c.post(
     "/v1/payments/submit-receipt",
     data={"plan": "yearly", "transaction_id": "abc-123"},  # dashes/case shouldn't matter
-    files={"receipt": ("r.jpg", b"fake jpeg bytes", "image/jpeg")},
+    files={"receipt": ("r.jpg", JPEG, "image/jpeg")},
 )
 check("auto-approve status 200", r.status_code == 200)
 body = r.json()
@@ -137,7 +154,7 @@ vision_state["response"] = json.dumps(
 r = c.post(
     "/v1/payments/submit-receipt",
     data={"plan": "yearly", "transaction_id": "XYZ999"},
-    files={"receipt": ("r.jpg", b"fake jpeg bytes", "image/jpeg")},
+    files={"receipt": ("r.jpg", JPEG, "image/jpeg")},
 )
 check("mismatch status 200", r.status_code == 200)
 body = r.json()
@@ -151,7 +168,7 @@ vision_state["response"] = json.dumps({"readable": False, "amount_etb": None, "t
 r = c.post(
     "/v1/payments/submit-receipt",
     data={"plan": "yearly", "transaction_id": "WHATEVER"},
-    files={"receipt": ("r.jpg", b"fake jpeg bytes", "image/jpeg")},
+    files={"receipt": ("r.jpg", JPEG, "image/jpeg")},
 )
 check("unreadable pending", r.json()["status"] == "pending")
 
@@ -159,7 +176,7 @@ check("unreadable pending", r.json()["status"] == "pending")
 r = c.post(
     "/v1/payments/submit-receipt",
     data={"plan": "not_a_real_plan", "transaction_id": "X"},
-    files={"receipt": ("r.jpg", b"fake", "image/jpeg")},
+    files={"receipt": ("r.jpg", JPEG, "image/jpeg")},
 )
 check("unknown plan 400", r.status_code == 400)
 
@@ -221,7 +238,7 @@ vision_state["response"] = json.dumps({"readable": True, "amount_etb": AMOUNT, "
 r = c.post(
     "/v1/payments/submit-receipt",
     data={"plan": "yearly", "transaction_id": "REF1"},
-    files={"receipt": ("r.jpg", b"fake", "image/jpeg")},
+    files={"receipt": ("r.jpg", JPEG, "image/jpeg")},
 )
 check("referred student's first payment auto-approved", r.json()["status"] == "completed")
 db.expire_all()
@@ -233,7 +250,7 @@ vision_state["response"] = json.dumps({"readable": False, "amount_etb": None, "t
 r = c.post(
     "/v1/payments/submit-receipt",
     data={"plan": "yearly", "transaction_id": "REF2"},
-    files={"receipt": ("r.jpg", b"fake", "image/jpeg")},
+    files={"receipt": ("r.jpg", JPEG, "image/jpeg")},
 )
 check("referred student's second payment falls to pending first", r.json()["status"] == "pending")
 second_payment_id = r.json()["payment_id"]
@@ -245,6 +262,23 @@ db.expire_all()
 check("referrer's count stays at 1 (not double-counted)", db.get(M.User, referrer.id).referral_paid_count == 1)
 
 app.dependency_overrides[R.get_current_user] = lambda: student  # restore for anything added after this
+
+
+# ---- receipt images: a gallery screenshot is converted, a non-image is refused ------------------
+before = len(uploaded)
+r = c.post(
+    "/v1/payments/submit-receipt",
+    data={"plan": "yearly", "transaction_id": "PNG-1"},
+    files={"receipt": ("screenshot.png", _image("PNG", "RGBA"), "image/png")},
+)
+check("PNG screenshot accepted", r.status_code == 200)
+check("PNG stored as JPEG", len(uploaded) == before + 1 and uploaded[-1][2][:3] == b"\xff\xd8\xff")
+r = c.post(
+    "/v1/payments/submit-receipt",
+    data={"plan": "yearly", "transaction_id": "TXT-1"},
+    files={"receipt": ("notes.txt", b"not an image", "text/plain")},
+)
+check("non-image refused with 400", r.status_code == 400 and "isn't a photo" in r.json()["detail"])
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

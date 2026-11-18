@@ -20,6 +20,7 @@ from payments.receipt_verification import (
     RECEIPT_MODEL_ID,
     RECEIPT_PROMPT,
     extract_receipt_data,
+    receipt_to_jpeg,
     verify_receipt,
 )
 from utils.logging import logger
@@ -53,7 +54,10 @@ def submit_receipt(
     if not transaction_id:
         raise HTTPException(status_code=400, detail="transaction_id is required")
 
-    photo_bytes = receipt.file.read()
+    try:
+        photo_bytes = receipt_to_jpeg(receipt.file.read())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     payment = Payment(
         user_id=user.id,
         gateway="manual",

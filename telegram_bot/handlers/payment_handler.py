@@ -101,8 +101,9 @@ async def receipt_photo_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
     transaction_id = parts[1].strip()
 
-    photo = update.message.photo[-1]
-    file = await photo.get_file()
+    # a photo, or an image sent as a file (the backend converts either to JPEG)
+    attachment = update.message.photo[-1] if update.message.photo else update.message.document
+    file = await attachment.get_file()
     photo_bytes = bytes(await file.download_as_bytearray())
 
     await update.message.reply_text("Checking your receipt...")

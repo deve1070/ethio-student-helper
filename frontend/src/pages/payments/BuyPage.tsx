@@ -1,6 +1,6 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, Camera, CheckCircle2, Clock } from "lucide-react"
+import { ArrowLeft, Camera, CheckCircle2, Clock, ImageIcon, X } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
 import { ErrorBanner, Field, TextInput } from "../../components/ui/Primitives"
@@ -16,7 +16,26 @@ export function BuyPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ status: "completed" | "pending"; message: string } | null>(null)
-  const fileInput = useRef<HTMLInputElement>(null)
+  // Two inputs: the camera one carries capture="environment", which opens the camera directly; the
+  // other has no capture, so the phone offers its gallery and files (where a receipt screenshot is).
+  const cameraInput = useRef<HTMLInputElement>(null)
+  const galleryInput = useRef<HTMLInputElement>(null)
+  const [preview, setPreview] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!file) {
+      setPreview(null)
+      return
+    }
+    const url = URL.createObjectURL(file)
+    setPreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  function pick(e: React.ChangeEvent<HTMLInputElement>) {
+    setFile(e.target.files?.[0] ?? null)
+    e.target.value = "" // picking the same photo again still fires onChange
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -89,25 +108,41 @@ export function BuyPage() {
           />
         </Field>
 
-        <Field label="Receipt photo" htmlFor="receipt">
-          <button
-            type="button"
-            onClick={() => fileInput.current?.click()}
-            className="flex h-32 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-300 text-sm text-zinc-500 hover:border-brand-400 hover:text-brand-700"
-          >
-            <Camera className="size-6" aria-hidden />
-            {file ? file.name : "Tap to choose a photo"}
-          </button>
-          <input
-            ref={fileInput}
-            id="receipt"
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            required
-          />
+        <Field label="Receipt photo or screenshot" htmlFor="receiptGallery">
+          {preview ? (
+            <div className="relative overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50">
+              <img src={preview} alt="Selected receipt" className="max-h-72 w-full object-contain" />
+              <button
+                type="button"
+                onClick={() => setFile(null)}
+                aria-label="Remove photo"
+                className="absolute top-2 right-2 flex size-8 items-center justify-center rounded-full bg-black/60 text-white"
+              >
+                <X className="size-4" aria-hidden />
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => galleryInput.current?.click()}
+                className="flex h-28 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-300 text-sm text-zinc-600 hover:border-brand-400 hover:text-brand-700"
+              >
+                <ImageIcon className="size-6" aria-hidden />
+                Choose from gallery
+              </button>
+              <button
+                type="button"
+                onClick={() => cameraInput.current?.click()}
+                className="flex h-28 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-300 text-sm text-zinc-600 hover:border-brand-400 hover:text-brand-700"
+              >
+                <Camera className="size-6" aria-hidden />
+                Take a photo
+              </button>
+            </div>
+          )}
+          <input ref={galleryInput} id="receiptGallery" type="file" accept="image/*" className="hidden" onChange={pick} />
+          <input ref={cameraInput} type="file" accept="image/*" capture="environment" className="hidden" onChange={pick} />
         </Field>
 
         <Button type="submit" size="lg" fullWidth loading={loading} disabled={!file || !transactionId}>
