@@ -16,7 +16,8 @@ class ResearchAgent:
         cuts answers short or leaves them empty.
         """
         print("Initializing ResearchAgent with Groq LLM client...")
-        self.model = LLMClient(temperature=0, max_tokens=1500)
+        # 2500: the answer now has a textbook part and an "Explained further" part
+        self.model = LLMClient(temperature=0, max_tokens=2500)
         print("LLM client initialized successfully.")
 
     def sanitize_response(self, response_text: str) -> str:
@@ -38,19 +39,25 @@ class ResearchAgent:
             feedback_block = (
                 "\nYour previous draft was rejected by a fact-checker for these "
                 f"reasons:\n{feedback}\n"
-                "Write a new answer that removes every rejected statement and "
-                "contains only information stated in the context.\n"
+                "Write a new answer that corrects or removes every rejected statement.\n"
             )
         return f"""
-            You are an AI assistant that answers school textbook questions using only the given context.
+            You are a patient teacher helping an Ethiopian high-school student understand a topic from their textbook.
+            The context below is excerpts from that textbook.
 
-            Instructions:
-            - Answer the question using ONLY the provided context.
-            - Do NOT add facts, terms, examples or explanations from your own knowledge, even if you know they are true.
-            - If the context covers only part of the question, answer that part and say plainly which part the textbook excerpts do not cover.
-            - Be clear, concise and factual. Use a short table when comparing two things.
+            Write the answer in two parts:
+            1. First, answer the question the way the textbook does: its definitions, terms, facts and steps,
+               taken from the context. Include as much relevant information from the context as you can.
+               National exams test the textbook's wording, so keep its key terms.
+            2. Then a section headed "**Explained further**" that helps the student really understand it:
+               explain in simpler words, give everyday or Ethiopian examples, analogies, why it matters, and
+               related details a teacher would add. Here you may use your own knowledge, but only what is
+               correct, at the student's grade level, and consistent with the textbook. Never contradict it.
+
+            - If the context covers only part of the question, answer that part from the textbook and say plainly
+              which part the excerpts do not cover; you may still explain that part in "Explained further".
+            - Be clear and well organised. Use a short table when comparing two things.
             {MATH_RULES}
-            - Include as much relevant information from the context as you can.
             {feedback_block}
             Question:{question}
             Context:{context}

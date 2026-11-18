@@ -203,7 +203,7 @@ class AgentWorkflow:
             state["draft_answer"], state["documents"], question=state["question"]
         )
         status = result["status"]
-        problems = result["unsupported_claims"] + result["contradictions"]
+        problems = result["incorrect_claims"] + result["contradictions"]
         update = {
             "verification_report": result["verification_report"],
             "verification_status": status,
@@ -214,9 +214,9 @@ class AgentWorkflow:
             status == "FAIL"
             and state.get("research_attempts", 0) >= MAX_RESEARCH_ATTEMPTS
         ):
-            note = "\n\n> Note: some details in this answer could not be confirmed in the textbook excerpts."
+            note = "\n\n> Note: a fact-check flagged some details in this answer. Please check them in your textbook."
             if problems:
-                note += " Unconfirmed: " + "; ".join(problems)
+                note += " Flagged: " + "; ".join(problems)
             update["draft_answer"] = state["draft_answer"] + note
 
         if status == "ERROR":

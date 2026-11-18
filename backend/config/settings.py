@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = "openai/gpt-oss-120b"
     GEMINI_API_KEY: str = ""
     GEMINI_CHAT_MODEL: str = "gemini-3.8-flash"
+    # Tried once when GEMINI_CHAT_MODEL is overloaded or down (llm/gemini_client.py); "" turns it off.
+    GEMINI_FALLBACK_MODEL: str = "gemini-2.5-flash"
 
     # Embeddings: local, via fastembed (ONNX Runtime, no torch) - NOT an API call, so no
     # key, no rate limit, no per-request cost. Replaced Gemini's embedding API after that

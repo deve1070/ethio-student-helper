@@ -40,33 +40,31 @@ class VerificationAgent:
         logger.info("Initializing VerificationAgent with a Gemini LLM client...")
         # A small time budget: the student is waiting, and the answer is already written. If Gemini
         # is overloaded the check is skipped (status ERROR) and the answer is sent as it is.
-        self.model = GeminiLLMClient(temperature=0, max_tokens=1000, timeout=20, retry_attempts=2, retry_max_wait=5)
+        # 4000: Gemini's hidden thinking shares this limit, and a long answer has many claims to check;
+        # at 1000 the reply was cut off mid-JSON
+        self.model = GeminiLLMClient(temperature=0, max_tokens=4000, timeout=25, retry_attempts=1)
 
     def generate_prompt(self, answer: str, context: str, question: str | None) -> str:
         question_block = f"QUESTION:\n{question}\n\n" if question else ""
         return (
-            "You are a strict fact-checker for a school study tool. Decide whether "
-            "the ANSWER is fully supported by the CONTEXT, which is a set of "
-            "excerpts from a textbook.\n\n"
+            "You are a careful fact-checker for a school study tool. The ANSWER "
+            "explains a topic to a high-school student. Its first part should follow "
+            "the CONTEXT (excerpts from the student's textbook); its 'Explained "
+            "further' part may add examples and detail beyond the textbook.\n\n"
             "Rules:\n"
             "- Split the ANSWER into individual factual claims and check each one.\n"
-            "- A claim is supported only if the CONTEXT states it, or it follows "
-            "directly from what the CONTEXT states.\n"
-            "- Do NOT use your own knowledge. A claim that is true in the real "
-            "world but is not in the CONTEXT is UNSUPPORTED. Extra terms, "
-            "examples, numbers and mechanisms that the CONTEXT never mentions "
-            "are unsupported.\n"
             "- A claim that conflicts with the CONTEXT is a contradiction.\n"
-            '- "supported" is true only if there are no unsupported claims and '
-            "no contradictions.\n"
+            "- A claim that is factually wrong is incorrect. Judge claims the "
+            "CONTEXT does not mention with your own knowledge. A correct claim is "
+            "fine even if the CONTEXT never mentions it, so do not report it.\n"
             '- "relevant" is true only if the ANSWER actually addresses the '
             "QUESTION.\n"
-            "- Quote or closely paraphrase each unsupported claim so it can be "
-            "removed.\n\n"
+            "- Quote or closely paraphrase each contradiction and incorrect claim "
+            "so it can be fixed.\n\n"
             "Return ONLY one JSON object, with no markdown fences and no other "
             "text, in exactly this shape:\n"
-            '{"supported": true, "unsupported_claims": [], "contradictions": [], '
-            '"relevant": true, "notes": "one short sentence"}\n\n'
+            '{"contradictions": [], "incorrect_claims": [], "relevant": true, '
+            '"notes": "one short sentence"}\n\n'
             f"{question_block}"
             f"ANSWER:\n{answer}\n\n"
             f"CONTEXT:\n{context}\n"
@@ -82,11 +80,10 @@ class VerificationAgent:
             data = json.loads(response_text[start : end + 1])
         except json.JSONDecodeError:
             return None
-        if not isinstance(data, dict) or "supported" not in data:
+        if not isinstance(data, dict) or not ({"contradictions", "incorrect_claims"} & data.keys()):
             return None
         return {
-            "supported": _as_bool(data.get("supported")),
-            "unsupported_claims": _as_list(data.get("unsupported_claims")),
+            "incorrect_claims": _as_list(data.get("incorrect_claims")),
             "contradictions": _as_list(data.get("contradictions")),
             "relevant": _as_bool(data.get("relevant", True)),
             "notes": str(data.get("notes", "")).strip(),
@@ -94,11 +91,9 @@ class VerificationAgent:
 
     @staticmethod
     def format_verification_report(v: dict) -> str:
-        # Plain "Supported: YES/NO" lines (no markdown bold) so the report is
-        # easy to read in logs and to search.
+        # Plain lines (no markdown bold) so the report is easy to read in logs and to search.
         return (
-            f"Supported: {'YES' if v['supported'] else 'NO'}\n"
-            f"Unsupported Claims: {'; '.join(v['unsupported_claims']) or 'None'}\n"
+            f"Incorrect Claims: {'; '.join(v['incorrect_claims']) or 'None'}\n"
             f"Contradictions: {'; '.join(v['contradictions']) or 'None'}\n"
             f"Relevant: {'YES' if v['relevant'] else 'NO'}\n"
             f"Additional Details: {v['notes'] or 'None'}\n"
@@ -116,7 +111,7 @@ class VerificationAgent:
                                        empty or unparseable reply); says nothing
                                        about the answer, so callers shouldn't
                                        treat it as a failed answer.
-          unsupported_claims, contradictions
+          incorrect_claims, contradictions
           context_used
         """
         context = "\n\n".join(doc.page_content for doc in documents)
@@ -132,7 +127,7 @@ class VerificationAgent:
             return {
                 "verification_report": f"Verification unavailable: {reason}",
                 "status": "ERROR",
-                "unsupported_claims": [],
+                "incorrect_claims": [],
                 "contradictions": [],
                 "context_used": context,
             }
@@ -152,18 +147,13 @@ class VerificationAgent:
         if parsed is None:
             return error_result("the reply was not valid JSON")
 
-        passed = (
-            parsed["supported"]
-            and parsed["relevant"]
-            and not parsed["unsupported_claims"]
-            and not parsed["contradictions"]
-        )
+        passed = parsed["relevant"] and not parsed["incorrect_claims"] and not parsed["contradictions"]
         report = self.format_verification_report(parsed)
         logger.info("Verification %s\n%s", "PASS" if passed else "FAIL", report)
         return {
             "verification_report": report,
             "status": "PASS" if passed else "FAIL",
-            "unsupported_claims": parsed["unsupported_claims"],
+            "incorrect_claims": parsed["incorrect_claims"],
             "contradictions": parsed["contradictions"],
             "context_used": context,
         }

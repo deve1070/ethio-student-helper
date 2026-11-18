@@ -12,11 +12,15 @@ works unchanged regardless of which client it's given.
 timeout bounds one request; retry_attempts and retry_max_wait bound the retrying in
 llm/retry.py. A caller whose result a student is waiting on, but which is only a check (the
 answer verifier), passes a small budget so an overloaded Gemini costs seconds, not minutes.
+
+Overload is per model (a 503 "high demand" on one model while another answers in two seconds was
+measured), so when the main model stays unavailable after its tries, one more try goes to
+settings.GEMINI_FALLBACK_MODEL before giving up.
 """
 
 from config.settings import settings
 from llm.gemini_rest import GeminiREST
-from llm.retry import invoke_with_retry
+from llm.retry import LLMUnavailableError, invoke_with_retry
 
 
 class GeminiLLMClient:
@@ -29,15 +33,21 @@ class GeminiLLMClient:
         retry_attempts: int = 5,
         retry_max_wait: float = 30.0,
     ):
-        self.model = GeminiREST(
-            model_id or settings.GEMINI_CHAT_MODEL,
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-            timeout=timeout,
-        )
+        main = model_id or settings.GEMINI_CHAT_MODEL
+        self.models = [
+            GeminiREST(m, temperature=temperature, max_output_tokens=max_tokens, timeout=timeout)
+            for m in dict.fromkeys([main, settings.GEMINI_FALLBACK_MODEL])  # keeps order, drops a repeat
+            if m
+        ]
         self.retry_attempts = retry_attempts
         self.retry_max_wait = retry_max_wait
 
     def chat(self, messages: list[dict]) -> dict:
-        response = invoke_with_retry(self.model, messages, attempts=self.retry_attempts, max_wait=self.retry_max_wait)
+        main, *fallback = self.models
+        try:
+            response = invoke_with_retry(main, messages, attempts=self.retry_attempts, max_wait=self.retry_max_wait)
+        except LLMUnavailableError:
+            if not fallback:
+                raise
+            response = invoke_with_retry(fallback[0], messages, attempts=1)
         return {"choices": [{"message": {"content": response.content}}]}
