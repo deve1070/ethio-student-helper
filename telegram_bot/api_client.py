@@ -157,6 +157,17 @@ def reject_payment(telegram_user_id: int, payment_id: str) -> dict:
     return response.json()
 
 
+def grant_subscription(telegram_user_id: int, identifier: str, days: int) -> dict:
+    response = httpx.post(
+        f"{BACKEND_BASE_URL}/v1/payments/grant",
+        json={"identifier": identifier, "days": days},
+        headers=_headers(telegram_user_id),
+        timeout=15,
+    )
+    _raise_for_status(response, telegram_user_id)
+    return response.json()
+
+
 def list_pending_payouts(telegram_user_id: int) -> list:
     response = httpx.get(
         f"{BACKEND_BASE_URL}/v1/referrals/payouts/pending",

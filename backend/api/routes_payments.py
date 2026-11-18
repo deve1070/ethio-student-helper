@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 import storage
 from auth.dependencies import get_current_user, require_admin
+from auth.identifiers import normalize_identifier
+from auth.telegram_notify import send_text
 from config.settings import settings
 from db.models import FreeActionUsage, Payment, Subscription, User
 from db.session import get_db
@@ -231,4 +233,46 @@ def my_entitlement(
         subscription_expires_at=sub.current_period_end if (active and sub) else None,
         free_actions_used=used or 0,
         free_actions_quota=FREE_ACTION_QUOTA,
+    )
+
+
+class GrantRequest(BaseModel):
+    identifier: str  # the student's phone number or email
+    days: int = 365
+
+
+class GrantResponse(BaseModel):
+    student_name: str
+    expires_at: datetime
+
+
+@router.post("/payments/grant", response_model=GrantResponse)
+def grant_subscription(
+    body: GrantRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> GrantResponse:
+    """Free access an admin gives without a payment, e.g. to a school's student ambassador. It is an
+    ordinary subscription, so it unlocks the same features and the subscriber group, and lapses the
+    same way when it ends."""
+    if not 1 <= body.days <= 3650:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 3650")
+    identifier = normalize_identifier(body.identifier)
+    student = (
+        db.query(User).filter((User.email == identifier) | (User.phone_number == identifier)).one_or_none()
+    )
+    if student is None:
+        raise HTTPException(status_code=404, detail="No account with that phone number or email")
+    sub = grant_or_extend_subscription(db, student.id, timedelta(days=body.days))
+    db.commit()
+    logger.info(f"Admin {admin.id} granted {body.days} days of access to {student.id}")
+    send_text(
+        db,
+        student,
+        f"You've been given free access to Ethiopian Student Helper until {sub.current_period_end:%d %B %Y}. "
+        "Every feature is unlocked, including the daily practice group.",
+    )
+    return GrantResponse(
+        student_name=student.full_name or student.phone_number or student.email or str(student.id),
+        expires_at=sub.current_period_end,
     )

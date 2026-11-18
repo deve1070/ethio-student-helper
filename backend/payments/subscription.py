@@ -19,8 +19,9 @@ def _as_utc(dt: datetime) -> datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
-def grant_or_extend_subscription(db: Session, user_id: UUID) -> Subscription:
-    """If the user already has an active, not-yet-expired subscription, extend it by 365 days
+def grant_or_extend_subscription(db: Session, user_id: UUID, duration: timedelta = SUBSCRIPTION_DURATION) -> Subscription:
+    """`duration` is a year for a payment, or what an admin chose for a free grant (/v1/payments/grant).
+    If the user already has an active, not-yet-expired subscription, extend it by `duration`
     from its current expiry (so renewing early stacks on top of remaining time rather than
     wasting it). Otherwise create a new one starting now. Does not commit - the caller commits
     once, alongside its own payment-status change."""
@@ -32,14 +33,14 @@ def grant_or_extend_subscription(db: Session, user_id: UUID) -> Subscription:
         .first()
     )
     if sub is not None and sub.current_period_end and _as_utc(sub.current_period_end) > now:
-        sub.current_period_end = _as_utc(sub.current_period_end) + SUBSCRIPTION_DURATION
+        sub.current_period_end = _as_utc(sub.current_period_end) + duration
         return sub
 
     sub = Subscription(
         user_id=user_id,
         plan="yearly",
         status="active",
-        current_period_end=now + SUBSCRIPTION_DURATION,
+        current_period_end=now + duration,
     )
     db.add(sub)
     return sub

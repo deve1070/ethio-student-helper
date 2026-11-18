@@ -9,6 +9,7 @@ see backend/payments/receipt_verification.py.
 
 Admin-only (the backend checks the calling account's is_admin flag, not this file):
 /pending_payments — list payments awaiting manual review, each with Approve/Reject buttons.
+/grant <phone or email> [days] — free access without payment (e.g. a school ambassador), default 365 days.
 /pending_payouts — list referral payout requests with the amount and the account to send it to,
 each with Mark paid/Reject buttons (the same buttons are on the push sent when a student asks).
 The same Approve/Reject buttons also appear on the notification pushed straight to an admin's
@@ -250,3 +251,31 @@ async def payout_review_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     await query.edit_message_reply_markup(reply_markup=None)
     await query.message.reply_text(outcome)
+
+
+async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/grant <phone or email> [days]"""
+    telegram_user_id = update.effective_user.id
+    if not api_client.is_logged_in(telegram_user_id):
+        await update.message.reply_text("Please /login first with your phone/email and password.")
+        return
+    args = context.args or []
+    days = 365
+    if len(args) >= 2 and args[-1].isdigit():
+        days = int(args[-1])
+        args = args[:-1]
+    identifier = " ".join(args).strip()
+    if not identifier:
+        await update.message.reply_text("Usage: /grant <phone or email> [days]\nExample: /grant 0912345678 180")
+        return
+    try:
+        result = await asyncio.to_thread(api_client.grant_subscription, telegram_user_id, identifier, days)
+    except BackendError as e:
+        if e.status_code == 403:
+            await update.message.reply_text("This command is for admins only.")
+        else:
+            await update.message.reply_text(f"Couldn't grant access: {e.detail}")
+        return
+    await update.message.reply_text(
+        f"Done. {result['student_name']} has free access until {result['expires_at'][:10]}. They've been told on Telegram if linked."
+    )

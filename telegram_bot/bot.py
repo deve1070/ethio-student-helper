@@ -39,6 +39,7 @@ from telegram_bot.handlers.payment_handler import (
     payment_review_callback,
     pending_payments_command,
     pending_payouts_command,
+    grant_command,
     payout_review_callback,
     receipt_photo_handler,
     status_command,
@@ -211,6 +212,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("subscribe", subscribe_command))
     app.add_handler(CommandHandler("pending_payments", pending_payments_command))
     app.add_handler(CommandHandler("pending_payouts", pending_payouts_command))
+    app.add_handler(CommandHandler("grant", grant_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("language", language_command))
     app.add_handler(CallbackQueryHandler(language_callback, pattern=r"^lang\|"))

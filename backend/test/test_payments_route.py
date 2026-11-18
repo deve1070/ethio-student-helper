@@ -21,6 +21,11 @@ def stub(name, **attrs):
 
 stub("auth")
 stub("auth.dependencies", get_current_user=lambda: None, require_admin=lambda: None)
+import importlib.util  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("auth.identifiers", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "auth", "identifiers.py"))
+sys.modules["auth.identifiers"] = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(sys.modules["auth.identifiers"])
 stub("db.session", get_db=lambda: None)
 
 # payments/referral.py pushes a best-effort Telegram notification to the referrer - stub it the same
@@ -285,6 +290,22 @@ r = c.post(
     files={"receipt": ("notes.txt", b"not an image", "text/plain")},
 )
 check("non-image refused with 400", r.status_code == 400 and "isn't a photo" in r.json()["detail"])
+
+
+# ---- admin grant: free access for an ambassador, found by phone in any spelling ----------------
+ambassador = M.User(id=uuid.uuid4(), full_name="Ambassador", phone_number="0911555666", is_admin=False)
+db.add(ambassador)
+db.commit()
+app.dependency_overrides[R.require_admin] = lambda: admin
+r = c.post("/v1/payments/grant", json={"identifier": "+251 911 555 666", "days": 90})
+check("grant accepted", r.status_code == 200 and r.json()["student_name"] == "Ambassador")
+db.expire_all()
+sub = active_subscription(ambassador.id)
+check("grant gives ~90 days", sub is not None and abs((sub.current_period_end - datetime.now(timezone.utc)) - timedelta(days=90)) < timedelta(hours=1))
+check("unknown account -> 404", c.post("/v1/payments/grant", json={"identifier": "0900000000"}).status_code == 404)
+check("bad days -> 400", c.post("/v1/payments/grant", json={"identifier": "0911555666", "days": 0}).status_code == 400)
+app.dependency_overrides[R.require_admin] = _forbidden
+check("non-admin cannot grant", c.post("/v1/payments/grant", json={"identifier": "0911555666"}).status_code == 403)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
