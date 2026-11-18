@@ -201,7 +201,7 @@ class ExamQuestionSubmission(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     submitted_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id")
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     grade: Mapped[int | None] = mapped_column(SmallInteger)
     subject: Mapped[str | None] = mapped_column(String)
@@ -253,7 +253,7 @@ class ExamAnswer(Base):
         ),
     )
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id")
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -347,8 +347,9 @@ class ReferralPayout(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    # SET NULL, not CASCADE: a deleted account's payout records stay, as a record of money sent
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     amount_etb: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     method: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -363,7 +364,7 @@ class ReferralPayout(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
 
 
 class Payment(Base):
@@ -372,8 +373,10 @@ class Payment(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE")
+    # SET NULL, not CASCADE: a deleted account's payments stay (amount, dates, transaction id) as the
+    # business's record of money received; only the link to the person goes
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     gateway: Mapped[str | None] = mapped_column(String)  # always 'manual' now - see esh_payments_manual_receipt
     gateway_tx_ref: Mapped[str | None] = mapped_column(String, unique=True)
@@ -403,4 +406,4 @@ class Payment(Base):
 
     # explicit foreign_keys: payments now has two FKs to users (user_id, reviewed_by) - without
     # this, SQLAlchemy can't tell which one backs the student-facing "whose payment is this" side
-    user: Mapped["User"] = relationship(back_populates="payments", foreign_keys=[user_id])
+    user: Mapped["User | None"] = relationship(back_populates="payments", foreign_keys=[user_id])

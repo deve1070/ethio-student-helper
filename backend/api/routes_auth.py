@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field, model_validator
 from sqlalchemy.orm import Session
 
+from accounts.deletion import DeletionBlocked, check_can_delete, delete_account
 from api.rate_limit import limiter
 from auth.dependencies import get_current_user
 from auth.identifiers import normalize_email, normalize_identifier, normalize_phone
@@ -359,3 +360,28 @@ def update_me(
     db.commit()
     db.refresh(user)
     return _profile_response(db, user)
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+
+@router.post("/me/delete")
+@limiter.limit("5/minute")  # it checks a password, so the same guessing limit as /login
+def delete_me(
+    request: Request,
+    body: DeleteAccountRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Permanently deletes the logged-in student's account (accounts/deletion.py says what is kept).
+    The password is asked again so a phone left unlocked can't be used to delete someone's account."""
+    if user.password_hash is None or not verify_password(body.password, user.password_hash):
+        # 403, not 401: the web app treats 401 as an expired login and logs the student out
+        raise HTTPException(status_code=403, detail="That password is not correct.")
+    try:
+        check_can_delete(db, user)
+    except DeletionBlocked as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    delete_account(db, user)
+    return {"deleted": True}

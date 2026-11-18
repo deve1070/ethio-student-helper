@@ -59,3 +59,14 @@ def download(bucket: str, path: str, timeout: float = 30) -> bytes | None:
         return None
     resp.raise_for_status()
     return resp.content
+
+
+def delete(bucket: str, path: str) -> None:
+    """Removes one stored file; a file that is already gone is not an error."""
+    if not _configured():
+        Path(path).unlink(missing_ok=True)
+        return
+    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
+    resp = httpx.delete(url, headers={"Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}"}, timeout=30)
+    if resp.status_code not in (200, 204, 404):
+        resp.raise_for_status()

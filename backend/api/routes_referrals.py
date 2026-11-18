@@ -141,7 +141,9 @@ def request_payout(
     return _summary(db, user)
 
 
-def _student_name(user: User) -> str:
+def _student_name(user: User | None) -> str:
+    if user is None:
+        return "(deleted account)"
     return user.full_name or user.phone_number or user.email or str(user.id)
 
 
@@ -163,10 +165,10 @@ def pending_payouts(db: Session = Depends(get_db), admin: User = Depends(require
         PendingPayoutOut(
             **_payout_out(p).model_dump(),
             student_name=_student_name(p.user),
-            student_contact=p.user.phone_number or p.user.email,
+            student_contact=(p.user.phone_number or p.user.email) if p.user else None,
             text=payout_request_text(
                 _student_name(p.user),
-                p.user.phone_number or p.user.email,
+                (p.user.phone_number or p.user.email) if p.user else None,
                 float(p.amount_etb),
                 p.method,
                 p.account_number,
@@ -204,7 +206,8 @@ def _review(db: Session, admin: User, payout_id: uuid.UUID, status: Literal["pai
         message = f"Your referral payout request of {amount} was not processed, and the amount is back in your balance."
     if note:
         message += f"\nNote: {note}"
-    send_text(db, payout.user, message)
+    if payout.user is not None:
+        send_text(db, payout.user, message)
     return _payout_out(payout)
 
 

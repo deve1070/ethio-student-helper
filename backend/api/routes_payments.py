@@ -146,7 +146,7 @@ def list_pending_payments(
     return [
         PendingPaymentOut(
             payment_id=p.id,
-            student_name=p.user.full_name or p.user.phone_number or p.user.email or str(p.user_id),
+            student_name=(p.user.full_name or p.user.phone_number or p.user.email) if p.user else "(deleted account)",
             amount_etb=float(p.amount_etb or 0),
             submitted_transaction_id=p.submitted_transaction_id,
             verification_note=p.verification_note,
@@ -174,6 +174,8 @@ def approve_payment(
         return ReviewResponse(payment_id=payment.id, status="completed")  # already done, retried callback
     if payment.status != "pending":
         raise HTTPException(status_code=409, detail=f"Payment is '{payment.status}', not pending")
+    if payment.user_id is None:
+        raise HTTPException(status_code=409, detail="The account that made this payment was deleted")
 
     payment.status = "completed"
     payment.reviewed_by = admin.id
