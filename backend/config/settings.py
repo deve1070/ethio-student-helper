@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 from .constants import ALLOWED_TYPES, MAX_FILE_SIZE, MAX_TOTAL_SIZE
@@ -80,6 +81,13 @@ class Settings(BaseSettings):
     # require_bot_internal_token. MUST be overridden in any real deployment; this default is only
     # safe for local dev, same convention as JWT_SECRET_KEY above.
     BOT_INTERNAL_TOKEN: str = "dev-only-change-me"
+
+    @field_validator("TELEGRAM_CHANNEL_URL", "TELEGRAM_BOT_URL", "TELEGRAM_PRIVATE_GROUP_URL")
+    @classmethod
+    def _clean_link(cls, value: str) -> str:
+        # A link pasted from a message often carries the sentence's full stop or a stray space, and
+        # "https://t.me/name." opens a different, missing page.
+        return value.strip().rstrip("./,;")
 
     # Auth — JWT_SECRET_KEY MUST be overridden via environment in any
     # real deployment; this default is only safe for local dev

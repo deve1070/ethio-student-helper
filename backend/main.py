@@ -40,6 +40,11 @@ from utils.logging import logger
 if settings.ENVIRONMENT == "production" and settings.JWT_SECRET_KEY == "dev-only-change-me":
     raise RuntimeError("JWT_SECRET_KEY is still the dev default - set a real secret before running in production")
 
+# The same for the bot's shared secret: with the default, anyone could call the bot-only endpoints,
+# including the weekly reports that carry every linked student's results.
+if settings.ENVIRONMENT == "production" and settings.BOT_INTERNAL_TOKEN == "dev-only-change-me":
+    raise RuntimeError("BOT_INTERNAL_TOKEN is still the dev default - set a real secret before running in production")
+
 if settings.ENVIRONMENT == "production" and not settings.TELEGRAM_BOT_TOKEN:
     logger.warning(
         "TELEGRAM_BOT_TOKEN is unset in production - pending payment receipts will never "
@@ -116,7 +121,8 @@ _health_engines = {
 }
 
 
-@app.get("/health")
+# HEAD as well as GET: uptime monitors commonly check with HEAD, which would otherwise get 405.
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health() -> dict:
     for name, engine in _health_engines.items():
         try:
