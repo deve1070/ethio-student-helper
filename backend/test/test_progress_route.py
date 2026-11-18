@@ -4,7 +4,7 @@ Run from backend/:   python test/test_progress_route.py"""
 import sys
 import types
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, ".")
 
@@ -86,7 +86,8 @@ def client_for(user):
 
 
 def attempt_on(day_offset, practice=True):
-    ts = datetime.now() - timedelta(days=day_offset)
+    # UTC, as the database stores it; a naive local time would read as UTC and shift by 3 hours
+    ts = datetime.now(timezone.utc) - timedelta(days=day_offset)
     if practice:
         db.add(P.QuizAttempt(user_id=alice.id, question_id=q.id, chosen_index=0, is_correct=True, created_at=ts))
     else:
