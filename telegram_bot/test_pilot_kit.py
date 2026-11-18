@@ -266,14 +266,26 @@ class Bot:
         self.sent.append((chat_id, text, reply_markup))
 
 
+cancelled_reminders = []
+
+
+class CancelOnlyJobQueue:  # just enough for reminders.cancel_reminder
+    def get_jobs_by_name(self, name):
+        return [types.SimpleNamespace(schedule_removal=lambda: cancelled_reminders.append(name))]
+
+
 def job_ctx(uid, chat):
     return types.SimpleNamespace(
-        job=types.SimpleNamespace(user_id=uid, chat_id=chat), bot=Bot()
+        job=types.SimpleNamespace(user_id=uid, chat_id=chat), bot=Bot(), job_queue=CancelOnlyJobQueue()
     )
 
 
 S.set_store(S.Store(TMP / "d" / "state.json"))
 st = S.get_store()
+deleted_accounts = set()
+reminders.api_client.account_exists = lambda uid: uid not in deleted_accounts
+for uid, chat in ((20, 200), (21, 210), (22, 220), (23, 230)):
+    st.set_reminder(uid, chat, "18:00")  # every real reminder job is created from a saved reminder
 st.set_token(20, jwt(FUTURE))
 st.set_pref(20, 12, "information_technology")
 c = job_ctx(20, 200)
@@ -301,6 +313,13 @@ st.set_token(22, jwt(FUTURE))
 c = job_ctx(22, 220)
 run(reminders.send_reminder(c))
 assert "choose a subject" in c.bot.sent[0][1]  # no preference yet
+
+# an account deleted on the website: the reminder stops for good, nothing is sent
+st.set_token(23, jwt(FUTURE))
+deleted_accounts.add(23)
+c = job_ctx(23, 230)
+run(reminders.send_reminder(c))
+assert c.bot.sent == [] and cancelled_reminders == [reminders.job_name(23)]
 
 # a REAL job queue accepts the schedule and keeps the right local time
 from telegram.ext import Application

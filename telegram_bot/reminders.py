@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -76,8 +77,15 @@ async def send_reminder(context) -> None:
     job = context.job
     uid, chat_id = job.user_id, job.chat_id
     st = bot_store.get_store()
+    if st.get_reminder(uid) is None:
+        # its saved data was erased (the account was deleted): stop this daily job for good
+        cancel_reminder(context.job_queue, uid)
+        return
     if st.active_on(uid, local_today()):
         return  # already practised today: do not nag
+    if api_client.is_logged_in(uid) and not await asyncio.to_thread(api_client.account_exists, uid):
+        cancel_reminder(context.job_queue, uid)
+        return
     if not api_client.is_logged_in(uid):
         await context.bot.send_message(
             chat_id,

@@ -22,17 +22,27 @@ def _headers(telegram_user_id: int) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+# backend/auth/dependencies.py's 401 detail when the token is valid but its account no longer exists
+ACCOUNT_DELETED_DETAIL = "User not found"
+
+
+def _detail(response: httpx.Response):
+    try:
+        return response.json().get("detail")
+    except Exception:
+        return response.text
+
+
 def _raise_for_status(
     response: httpx.Response, telegram_user_id: int | None = None
 ) -> None:
     if response.status_code == 401 and telegram_user_id is not None:
-        _store.get_store().drop_token(telegram_user_id)
+        if _detail(response) == ACCOUNT_DELETED_DETAIL:
+            _store.get_store().forget_user(telegram_user_id)  # the account is gone, not just the login
+        else:
+            _store.get_store().drop_token(telegram_user_id)
     if response.status_code >= 400:
-        try:
-            detail = response.json().get("detail")
-        except Exception:
-            detail = response.text
-        raise BackendError(response.status_code, detail)
+        raise BackendError(response.status_code, _detail(response))
 
 
 def is_logged_in(telegram_user_id: int) -> bool:
@@ -93,6 +103,19 @@ def exam_solve(
     )
     _raise_for_status(response, telegram_user_id)
     return response.json()
+
+
+def account_exists(telegram_user_id: int) -> bool:
+    """False only when the backend says this login's account was deleted (any other failure, such as
+    the backend being briefly down, counts as existing, so a reminder is never cancelled by mistake)."""
+    try:
+        response = httpx.get(f"{BACKEND_BASE_URL}/v1/auth/me", headers=_headers(telegram_user_id), timeout=15)
+    except (httpx.HTTPError, BackendError):
+        return True
+    if response.status_code == 401 and _detail(response) == ACCOUNT_DELETED_DETAIL:
+        _store.get_store().forget_user(telegram_user_id)
+        return False
+    return True
 
 
 def public_config() -> dict:

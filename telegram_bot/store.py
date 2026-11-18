@@ -109,6 +109,15 @@ class Store:
             if self._data["sessions"].pop(str(uid), None) is not None:
                 self._save()
 
+    def forget_user(self, uid: int) -> None:
+        """Erase everything kept for this Telegram user: used when their account has been deleted."""
+        with self._lock:
+            changed = False
+            for name in self.SECTIONS:
+                changed |= self._data[name].pop(str(uid), None) is not None
+            if changed:
+                self._save()
+
     # ---- reminders -------------------------------------------------------------------------------------------
     def set_reminder(self, uid: int, chat_id: int, hhmm: str) -> None:
         with self._lock:

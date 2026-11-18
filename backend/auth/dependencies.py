@@ -24,6 +24,8 @@ def get_current_user(
 
     user = db.get(User, user_id)
     if user is None:
+        # the bot matches this exact text to tell a deleted account from an expired login
+        # (telegram_bot/api_client.py ACCOUNT_DELETED_DETAIL), and then erases what it keeps for them
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
