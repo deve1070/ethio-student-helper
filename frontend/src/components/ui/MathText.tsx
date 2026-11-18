@@ -76,10 +76,10 @@ export function MathText({ text, className }: { text: string; className?: string
           // A formula on its own line (as opposed to inline math woven into a sentence) gets its own
           // visually distinct "formula card" - the content-type coloring the user asked for: every
           // stated formula/theorem looks the same way everywhere MathText is used, not just in notes.
-          // eslint-disable-next-line react/no-danger -- katex.renderToString's own output, not user HTML
+          // innerHTML is katex.renderToString's own output, not user HTML
           <div key={`m${i++}`} className="my-2 overflow-x-auto rounded-lg bg-indigo-50 px-3 py-2 text-center" dangerouslySetInnerHTML={html} />
         ) : (
-          // eslint-disable-next-line react/no-danger -- katex.renderToString's own output, not user HTML
+          // innerHTML is katex.renderToString's own output, not user HTML
           <span key={`m${i++}`} dangerouslySetInnerHTML={html} />
         ),
       )

@@ -64,7 +64,6 @@ export function EsslceSessionPage() {
             })
 
     request.then((r) => setQuestions(r.questions)).catch((e) => setError(errorMessage(e)))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subject, mode, paperId, incorrectOnly, reviewDue, unit, skill, unitGrade])
 
   useEffect(load, [load])
