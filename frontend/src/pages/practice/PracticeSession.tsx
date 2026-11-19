@@ -6,6 +6,7 @@ import { Card } from "../../components/ui/Card"
 import { MathText } from "../../components/ui/MathText"
 import { EmptyState, ErrorBanner, FullPageSpinner } from "../../components/ui/Primitives"
 import { OptionList } from "../../components/question/OptionList"
+import { WhyWrongNote } from "../../components/question/WhyWrongNote"
 import { useAuth } from "../../lib/auth"
 import { errorMessage, practice, type PracticeAnswer, type PracticeQuestion } from "../../lib/api"
 
@@ -130,6 +131,15 @@ export function PracticeSessionPage() {
               <p className="text-[15px] leading-relaxed text-zinc-700">
                 <MathText text={feedback.explanation} />
               </p>
+              {!feedback.is_correct && selected !== null && (
+                <WhyWrongNote
+                  key={`${questions[index].id}-${selected}`}
+                  chosenIndex={selected}
+                  initial={feedback.why_wrong}
+                  load={() => practice.whyWrong(questions[index].id, selected)}
+                  autoLoad
+                />
+              )}
               <p className="rounded-lg bg-zinc-50 p-3 text-sm italic text-zinc-500">
                 "{feedback.supporting_quote}"
               </p>

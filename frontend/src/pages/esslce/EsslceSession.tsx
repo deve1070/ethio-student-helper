@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/Button"
 import { Card } from "../../components/ui/Card"
 import { EmptyState, ErrorBanner, FullPageSpinner } from "../../components/ui/Primitives"
 import { OptionList } from "../../components/question/OptionList"
+import { WhyWrongNote } from "../../components/question/WhyWrongNote"
 import { QuestionNavigator } from "../../components/esslce/QuestionNavigator"
 import { ElaboratePanel } from "../../components/esslce/ElaboratePanel"
 import { AskChatPanel } from "../../components/esslce/AskChatPanel"
@@ -236,6 +237,15 @@ export function EsslceSessionPage() {
                 <p className="text-[15px] leading-relaxed text-zinc-700">
                   <MathText text={feedback.explanation} />
                 </p>
+              )}
+              {!feedback.is_correct && selected !== null && (
+                <WhyWrongNote
+                  key={`${current.id}-${selected}`}
+                  chosenIndex={selected}
+                  initial={feedback.why_wrong}
+                  load={() => esslce.whyWrong(current.id, selected)}
+                  autoLoad
+                />
               )}
               <div className="flex flex-wrap gap-2">
                 <ElaboratePanel questionId={current.id} />

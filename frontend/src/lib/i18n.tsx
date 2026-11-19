@@ -116,6 +116,15 @@ const AM: Record<string, string> = {
   "Your study plan is ready. Let's get started.": "የጥናት እቅድዎ ዝግጁ ነው። እንጀምር።",
   "Go to Dashboard": "ወደ መነሻ ገጽ",
 
+  // why the picked wrong option looked right
+  "Working out why {letter} looked right...": "{letter} ለምን ትክክል እንደመሰለ እየተዘጋጀ ነው...",
+  "Still working on it...": "አሁንም እየተዘጋጀ ነው...",
+  "Why {letter} looked right:": "{letter} ለምን ትክክል መሰለ፦",
+  "Why it's wrong:": "ለምን ስህተት ሆነ፦",
+  "Couldn't explain {letter} right now.": "አሁን {letter}ን ማብራራት አልተቻለም።",
+  "Try again": "እንደገና ይሞክሩ",
+  "Why did {letter} look right?": "{letter} ለምን ትክክል መሰለ?",
+
   // account deletion
   "Delete account": "መለያ ሰርዝ",
   "Delete your account permanently": "መለያዎን በቋሚነት ይሰርዙ",

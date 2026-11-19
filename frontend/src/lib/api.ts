@@ -160,12 +160,19 @@ export interface PracticeUnit {
   accuracy: number | null
   level: string
 }
+/** Why the option the student picked looked right, and what is wrong with it. */
+export interface WrongChoiceNote {
+  chosen_index: number
+  tempting: string
+  wrong: string
+}
 export interface PracticeAnswer {
   is_correct: boolean
   correct_index: number
   explanation: string
   supporting_quote: string
   citation: { textbook: string; unit: string | null; page: string | null }
+  why_wrong: WrongChoiceNote | null // only when wrong and already stored; otherwise ask practice.whyWrong
 }
 export interface TrendPoint {
   date: string
@@ -187,6 +194,7 @@ export interface PracticeMistake {
   correct_index: number
   explanation: string
   unit: string | null
+  why_wrong: WrongChoiceNote | null
 }
 export interface PracticeProgress {
   grade: number
@@ -217,6 +225,8 @@ export const practice = {
     }),
   answer: (question_id: string, chosen_index: number) =>
     post<PracticeAnswer>("/v1/practice/answer", { question_id, chosen_index }),
+  whyWrong: (question_id: string, chosen_index: number) =>
+    post<WrongChoiceNote>("/v1/practice/why-wrong", { question_id, chosen_index }),
   progress: (grade: number, subject: string) =>
     get<PracticeProgress>("/v1/practice/progress", { grade, subject }),
   mistakes: (grade: number, subject: string, count = 20) =>
@@ -258,6 +268,7 @@ export interface EsslceAnswer {
   explanation: string | null
   supporting_quote: string | null
   explanation_image_base64: string | null
+  why_wrong: WrongChoiceNote | null // only when wrong and already stored; otherwise ask esslce.whyWrong
 }
 export interface EsslceCitation {
   textbook: string
@@ -323,6 +334,7 @@ export interface EsslceMistake {
   explanation_image_base64: string | null
   unit: string | null
   skill: string | null
+  why_wrong: WrongChoiceNote | null
 }
 export interface ExamSummary {
   paper_id: number
@@ -392,6 +404,8 @@ export const esslce = {
   }) => post<{ paper_id: number | null; questions: EsslceQuestion[] }>("/v1/esslce/next", args),
   answer: (question_id: number, chosen_index: number, mode: EsslceMode) =>
     post<EsslceAnswer>("/v1/esslce/answer", { question_id, chosen_index, mode }),
+  whyWrong: (question_id: number, chosen_index: number) =>
+    post<WrongChoiceNote>("/v1/esslce/why-wrong", { question_id, chosen_index }),
   elaborate: (question_id: number) =>
     post<EsslceElaboration>("/v1/esslce/elaborate", { question_id }),
   ask: (question_id: number, message: string, history: { role: "user" | "assistant"; content: string }[]) =>
