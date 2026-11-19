@@ -25,6 +25,7 @@ Entry points:
 
 import hashlib
 import json
+import re
 
 from llm.client import LLMClient, parse_json_object
 from pydantic import BaseModel
@@ -48,13 +49,24 @@ Rules:
 correct answer is doubtful.
 - Use the explanation and source text above when they are given. Do not add facts you are not sure of; \
 if you cannot tell why someone would choose an option, say what it gets wrong instead of inventing a reason.
-- For a calculation, name a slip (a forgotten square, a unit not converted, a sign error) only when that \
-slip really gives exactly that option's value. Otherwise say plainly that the value does not follow.
-- Refer to options by their LETTER. Write plain sentences. Use \\( ... \\) only for a formula that needs it.
+- Refer to options by their LETTER. Write plain text only: no LaTeX and no backslashes. Write a formula the \
+way you would type it, e.g. d = 1/2 × a × t².
 - Each part is at most two sentences.
-
+{calculation_rules}
 Reply with ONLY a JSON object with one entry per wrong option, keyed by its letter:
 {example}"""
+
+
+CALCULATION_RULES = """- This is a calculation question. When "tempting" names a slip (a forgotten 1/2, a unit not \
+converted, a sign error), also give "slip_code": a short Python script, using only math and fractions, that \
+follows exactly that slip with the question's own numbers and prints ONLY the resulting number on its last \
+line, written like the option's number without its unit (e.g. 7/3, not 2.333). The slip is checked by running \
+this code. If no single slip gives that option's value, set "slip_code" to null and do not describe a slip; \
+say that the value does not follow from the given numbers.
+"""
+
+# shown instead of a slip the model claimed but whose code did not give the option's value
+UNCHECKED_SLIP = "No single common slip that we could check leads to this value."
 
 
 def fingerprint(stem: str, options: list, answer_index: int) -> str:
@@ -91,8 +103,36 @@ def _clean(value) -> str | None:
     return text
 
 
-def parse_notes(raw: str, n_options: int, answer_index: int) -> list | None:
-    """The model's reply as the stored notes list, or None unless every wrong option has both parts."""
+_NUMBER = re.compile(r"[-+]?\d+(?:\.\d+)?(?:/\d+)?")
+
+
+def slip_gives_option(code, option_text: str) -> bool:
+    """Run the slip's code and compare its printed value with the option's printed number. Units and
+    other words in the option are ignored: "100 m" matches a printed 100."""
+    from exams.store import _results_match, run_verification_code
+
+    if not isinstance(code, str) or not code.strip():
+        return False
+    computed = run_verification_code(code)
+    if computed is None:
+        return False
+    if _results_match(computed, option_text):
+        return True
+    m = _NUMBER.search(option_text)
+    if m is None:
+        return False
+    try:
+        from fractions import Fraction
+
+        return abs(float(Fraction(computed)) - float(Fraction(m.group()))) <= 1e-6 * max(1.0, abs(float(Fraction(m.group()))))
+    except (ValueError, ZeroDivisionError):
+        return _results_match(computed, m.group())
+
+
+def parse_notes(raw: str, n_options: int, answer_index: int, options: list | None = None) -> list | None:
+    """The model's reply as the stored notes list, or None unless every wrong option has both parts.
+    With `options` (a calculation question), a slip whose code is missing or does not give that
+    option's value is replaced by UNCHECKED_SLIP, so an invented slip is never shown."""
     data = parse_json_object(raw)
     if not data:
         return None
@@ -106,23 +146,29 @@ def parse_notes(raw: str, n_options: int, answer_index: int) -> list | None:
         tempting, wrong = _clean(entry.get("tempting")), _clean(entry.get("wrong"))
         if not tempting or not wrong:
             return None
+        if options is not None and not slip_gives_option(entry.get("slip_code"), options[i]):
+            tempting = UNCHECKED_SLIP
         notes[i] = {"tempting": tempting, "wrong": wrong}
     return notes
 
 
-def generate_notes(llm, stem: str, options: list, answer_index: int, context: str = "") -> list | None:
+def generate_notes(
+    llm, stem: str, options: list, answer_index: int, context: str = "", calculation: bool = False
+) -> list | None:
     wrong_letters = [LETTERS[i] for i in range(len(options)) if i != answer_index]
-    example = json.dumps({L: {"tempting": "...", "wrong": "..."} for L in wrong_letters})
+    entry = {"tempting": "...", "wrong": "...", **({"slip_code": "... or null"} if calculation else {})}
+    example = json.dumps({L: entry for L in wrong_letters})
     prompt = PROMPT.format(
         stem=stem,
         options="\n".join(f"{L}) {opt}" for L, opt in zip(LETTERS, options)),
         correct_letter=LETTERS[answer_index],
         correct=options[answer_index],
         context=context,
+        calculation_rules=CALCULATION_RULES if calculation else "",
         example=example,
     )
     raw = (llm.chat(messages=[{"role": "user", "content": prompt}])["choices"][0]["message"]["content"] or "").strip()
-    return parse_notes(raw, len(options), answer_index)
+    return parse_notes(raw, len(options), answer_index, options if calculation else None)
 
 
 class WrongChoiceNote(BaseModel):
@@ -175,14 +221,16 @@ def store_notes(row, stem: str, notes: list) -> None:
     row.wrong_option_notes = {"fingerprint": fingerprint(stem, row.options, row.answer_index), "notes": notes}
 
 
-def get_or_create_note(db, llm, row, stem: str, chosen_index: int, context: str = "") -> dict | None:
+def get_or_create_note(
+    db, llm, row, stem: str, chosen_index: int, context: str = "", calculation: bool = False
+) -> dict | None:
     """The note for `chosen_index`, generating and storing notes for all wrong options on a miss."""
     if chosen_index == row.answer_index or not 0 <= chosen_index < len(row.options or []):
         return None
     cached = note_for(row, stem, chosen_index)
     if cached is not None:
         return cached
-    notes = generate_notes(llm, stem, list(row.options), row.answer_index, context)
+    notes = generate_notes(llm, stem, list(row.options), row.answer_index, context, calculation)
     if notes is None:
         return None
     store_notes(row, stem, notes)

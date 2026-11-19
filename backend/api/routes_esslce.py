@@ -767,7 +767,11 @@ def why_wrong(
     )
     if picked is None:
         raise HTTPException(status_code=404, detail="You have not picked that option for this question.")
-    note = get_or_create_note(db, note_llm(), question, question.stem, request.chosen_index, esslce_context(question))
+    paper = db.get(EsslcePaper, question.paper_id)
+    note = get_or_create_note(
+        db, note_llm(), question, question.stem, request.chosen_index, esslce_context(question),
+        calculation=paper.subject in CALCULATION_SUBJECTS,
+    )
     if note is None:
         raise HTTPException(status_code=422, detail="Could not prepare this explanation right now. Try again later.")
     return as_response(note, request.chosen_index)

@@ -94,6 +94,25 @@ long["A"]["wrong"] = "word " * 200
 notes = W.parse_notes(json.dumps(long), 4, 2)
 check("an over-long part is cut at a word", len(notes[0]["wrong"]) <= W.MAX_NOTE_CHARS and notes[0]["wrong"].endswith("…"))
 
+# ---- calculation questions: a claimed slip is shown only when its code gives the option's value -------------
+calc_options = ["100 m", "50 m", "4 m", "200 m"]  # from rest to 20 m/s in 5 s: a = 4, d = 50
+calc_reply = json.dumps({
+    "A": {"tempting": "Forgot the 1/2 in d = 1/2 a t².", "wrong": "d is 50 m.", "slip_code": "a = 20/5\nprint(int(a * 5**2))"},
+    "C": {"tempting": "Took the acceleration as the distance.", "wrong": "4 is the acceleration.", "slip_code": "print(7)"},
+    "D": {"tempting": "Used 10 s.", "wrong": "d is 50 m.", "slip_code": None},
+})
+calc_llm = FakeLLM(calc_reply)
+notes = W.generate_notes(calc_llm, "A car accelerates from rest to 20 m/s in 5 s. How far does it go?", calc_options, 1, calculation=True)
+check("calculation prompt asks for slip code", "slip_code" in calc_llm.prompts[0] and "checked by running" in calc_llm.prompts[0])
+check("checked slip kept (100 m matches a printed 100)", notes[0]["tempting"] == "Forgot the 1/2 in d = 1/2 a t².")
+check("slip whose code prints another value replaced", notes[2]["tempting"] == W.UNCHECKED_SLIP and notes[2]["wrong"] == "4 is the acceleration.")
+check("slip without code replaced", notes[3]["tempting"] == W.UNCHECKED_SLIP)
+plain_llm = FakeLLM(GOOD)
+W.generate_notes(plain_llm, STEM, row.options, 2)
+check("non-calculation prompt has no slip code", "slip_code" not in plain_llm.prompts[0])
+check("fraction printed like the option matches", W.slip_gives_option("from fractions import Fraction\nprint(Fraction(3,4)*Fraction(1,2))", "3/8"))
+check("unsafe or broken code never matches", not W.slip_gives_option("import os\nprint(100)", "100 m") and not W.slip_gives_option("print(1/0)", "1"))
+
 check("response model", W.as_response(note, 1).model_dump() == {"chosen_index": 1, **note} and W.as_response(None, 1) is None)
 
 print(f"\n{failures} failure(s)")

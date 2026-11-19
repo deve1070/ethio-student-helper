@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db.models_practice import QuizAttempt, QuizQuestion  # noqa: E402
 from db.session import SessionLocal  # noqa: E402
 from exams.models import EsslceAttempt, EsslcePaper, EsslceQuestion  # noqa: E402
+from config.constants import CALCULATION_SUBJECTS  # noqa: E402
 from exams.store import eligible  # noqa: E402
 from explanations.wrong_choice import esslce_context, generate_notes, practice_context, store_notes, stored_notes  # noqa: E402
 from llm.client import LLMClient  # noqa: E402
@@ -30,12 +31,14 @@ def candidates(db, system: str, subject: str | None, wrong_first: bool):
         if subject:
             q = q.filter(EsslcePaper.subject == subject)
         attempt, stem_of, context_of = EsslceAttempt, (lambda r: r.stem), esslce_context
+        is_calculation = lambda r: r.paper.subject in CALCULATION_SUBJECTS  # noqa: E731
         rows = [r for r in q.all() if eligible(r)]
     else:
         q = db.query(QuizQuestion).filter(QuizQuestion.status == "active")
         if subject:
             q = q.filter(QuizQuestion.subject == subject)
         attempt, stem_of, context_of = QuizAttempt, (lambda r: r.question), practice_context
+        is_calculation = lambda r: False  # noqa: E731  (generated practice questions never ask for calculations)
         rows = q.all()
     if wrong_first:
         misses = dict(
@@ -45,7 +48,7 @@ def candidates(db, system: str, subject: str | None, wrong_first: bool):
             .all()
         )
         rows.sort(key=lambda r: misses.get(r.id, 0), reverse=True)
-    return [(r, stem_of, context_of) for r in rows if stored_notes(r, stem_of(r)) is None]
+    return [(r, stem_of, context_of, is_calculation(r)) for r in rows if stored_notes(r, stem_of(r)) is None]
 
 
 def main() -> None:
@@ -62,10 +65,10 @@ def main() -> None:
     todo = candidates(db, args.system, args.subject, args.wrong_first)
     print(f"{len(todo)} question(s) without notes; writing up to {args.limit}")
     written = failed = 0
-    for row, stem_of, context_of in todo[: args.limit]:
+    for row, stem_of, context_of, calculation in todo[: args.limit]:
         stem = stem_of(row)
         try:
-            notes = generate_notes(llm, stem, list(row.options), row.answer_index, context_of(row))
+            notes = generate_notes(llm, stem, list(row.options), row.answer_index, context_of(row), calculation)
         except Exception as e:  # noqa: BLE001  (one provider failure should not stop the run)
             print(f"  {row.id}: {type(e).__name__}: {e}")
             notes = None
