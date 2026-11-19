@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     # /public-config; telegram_bot/config.py reads the same TELEGRAM_CHANNEL_URL for /help.
     TELEGRAM_CHANNEL_URL: str = "https://t.me/ethio_student_helper"
     TELEGRAM_BOT_URL: str = "https://t.me/esh_bot"
+    # The web app's address, for links the bot posts (the channel posts' "Open the app" buttons)
+    WEB_APP_URL: str = "https://ethio-student-helper.vercel.app"
 
     # The subscriber-only private group the daily mass-practice event runs in (telegram_bot/
     # mass_challenge.py) - a negative chat id once the owner creates the group and adds the bot as
@@ -90,7 +92,7 @@ class Settings(BaseSettings):
         # from a pasted value are dropped, and Google's own "models/" prefix is accepted.
         return value.strip().strip("\"'").strip().removeprefix("models/")
 
-    @field_validator("TELEGRAM_CHANNEL_URL", "TELEGRAM_BOT_URL", "TELEGRAM_PRIVATE_GROUP_URL")
+    @field_validator("TELEGRAM_CHANNEL_URL", "TELEGRAM_BOT_URL", "TELEGRAM_PRIVATE_GROUP_URL", "WEB_APP_URL")
     @classmethod
     def _clean_link(cls, value: str) -> str:
         # A link pasted from a message often carries the sentence's full stop or a stray space, and

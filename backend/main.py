@@ -29,6 +29,7 @@ from api.routes_payments import router as payments_router
 from api.routes_practice import router as practice_router
 from api.routes_progress import router as progress_router
 from api.routes_referrals import router as referrals_router
+from api.routes_channel import router as channel_router
 from api.routes_notes import router as notes_router
 from api.routes_studyplan import router as studyplan_router
 from config.settings import settings
@@ -112,6 +113,7 @@ app.include_router(notes_router)
 app.include_router(exam_router)
 app.include_router(mass_challenge_router)
 app.include_router(referrals_router)
+app.include_router(channel_router)
 
 # Built once, reused by every /health call below instead of opening a fresh connection
 # pool per request.

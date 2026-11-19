@@ -1,4 +1,5 @@
 import random
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from accounts.deletion import DeletionBlocked, check_can_delete, delete_account
 from api.rate_limit import limiter
-from auth.dependencies import get_current_user
+from auth.dependencies import get_current_user, require_admin
 from auth.identifiers import normalize_email, normalize_identifier, normalize_phone
 from auth.referral import generate_referral_code
 from auth.security import create_access_token, hash_password, verify_password
@@ -41,6 +42,8 @@ class SignupRequest(BaseModel):
     full_name: str | None = None
     grade_level: int | None = Field(None, ge=9, le=12)
     referral_code: str | None = Field(None, max_length=16)
+    # the ?src= tag of the link the student arrived by; a malformed one is dropped, never an error
+    signup_source: str | None = Field(None, max_length=64)
 
     @model_validator(mode="after")
     def _identifier_required(self):
@@ -90,6 +93,7 @@ def signup(request: Request, body: SignupRequest, db: Session = Depends(get_db))
         password_hash=hash_password(body.password),
         referral_code=generate_referral_code(db),
         referred_by_user_id=referred_by_user_id,
+        signup_source=clean_signup_source(body.signup_source),
     )
     db.add(user)
     db.commit()
@@ -243,9 +247,52 @@ def confirm_password_reset(
     return TokenResponse(access_token=create_access_token(user.id), user_id=user.id)
 
 
+_SOURCE = re.compile(r"^[a-z0-9_-]{1,32}$")
+
+
+def clean_signup_source(raw: str | None) -> str | None:
+    value = (raw or "").strip().lower()
+    return value if _SOURCE.match(value) else None
+
+
+class SourceCount(BaseModel):
+    source: str  # "(none)" for students who arrived without a ?src= tag
+    signups: int
+    subscribed: int  # of those, how many have an active subscription now
+
+
+class SignupSourcesResponse(BaseModel):
+    days: int
+    sources: list[SourceCount]
+
+
+@router.get("/signup-sources", response_model=SignupSourcesResponse)
+def signup_sources(
+    days: int = 30, db: Session = Depends(get_db), _admin: User = Depends(require_admin)
+) -> SignupSourcesResponse:
+    """Admin: signups in the last `days` days by where they came from, and how many now subscribe -
+    how the bot's /channel_stats tells whether the channel posts bring students in."""
+    days = max(1, min(days, 365))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = db.query(User.id, User.signup_source).filter(User.created_at >= since).all()
+    counts: dict[str, list[int]] = {}
+    for uid, source in rows:
+        c = counts.setdefault(source or "(none)", [0, 0])
+        c[0] += 1
+        c[1] += has_active_subscription(db, uid)
+    return SignupSourcesResponse(
+        days=days,
+        sources=[
+            SourceCount(source=s, signups=n, subscribed=paid)
+            for s, (n, paid) in sorted(counts.items(), key=lambda kv: -kv[1][0])
+        ],
+    )
+
+
 class PublicConfigResponse(BaseModel):
     telegram_channel_url: str | None
     telegram_bot_url: str | None
+    web_app_url: str
     subscription_price_etb: float
     referral_reward_etb: float
     payment_telebirr_number: str
@@ -259,6 +306,7 @@ def public_config() -> PublicConfigResponse:
     return PublicConfigResponse(
         telegram_channel_url=settings.TELEGRAM_CHANNEL_URL or None,
         telegram_bot_url=settings.TELEGRAM_BOT_URL or None,
+        web_app_url=settings.WEB_APP_URL,
         subscription_price_etb=settings.SUBSCRIPTION_PRICE_ETB,
         referral_reward_etb=settings.REFERRAL_REWARD_ETB,
         payment_telebirr_number=settings.PAYMENT_TELEBIRR_NUMBER,

@@ -79,6 +79,9 @@ class User(Base):
     # Total referral rewards earned, each added at the reward in force when it was earned, so changing
     # settings.REFERRAL_REWARD_ETB later never rewrites what a student already earned.
     referral_earned_etb: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
+    # Where the student came from when they signed up, from the web app's ?src= link tag (e.g.
+    # "channel" for the channel posts' buttons); NULL when they arrived without one.
+    signup_source: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

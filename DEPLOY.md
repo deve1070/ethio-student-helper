@@ -98,7 +98,9 @@ accident:
 - Variables: `TELEGRAM_BOT_TOKEN`, `BOT_INTERNAL_TOKEN` (same value as the
   backend's), `TELEGRAM_CHANNEL_URL` (optional), `TELEGRAM_PRIVATE_GROUP_ID` (same value as
   the backend's), `MASS_CHALLENGE_TIME`, `MASS_CHALLENGE_HEADSUP_MINUTES`, `MASS_CHALLENGE_NUDGE_MINUTES`,
-  `MASS_CHALLENGE_NATURAL_TOPIC_ID`, `MASS_CHALLENGE_SOCIAL_TOPIC_ID`, `BOT_DATA_DIR=/data`, and
+  `MASS_CHALLENGE_NATURAL_TOPIC_ID`, `MASS_CHALLENGE_SOCIAL_TOPIC_ID`, optionally `CHANNEL_POSTS`,
+  `CHANNEL_POST_TIME`, `CHANNEL_FEATURE_DAYS`, `CHANNEL_CHAT_ID` (channel posts; the bot must be a
+  channel admin with "Post messages"), `BOT_DATA_DIR=/data`, and
   `BACKEND_BASE_URL` = the backend service's public URL from step 3a (Railway's
   private-networking domain, `<service>.railway.internal`, is a worthwhile
   latency/egress optimization once the public-URL version is confirmed working
