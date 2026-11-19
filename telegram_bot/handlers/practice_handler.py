@@ -1,6 +1,7 @@
 import asyncio
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ChatAction
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
@@ -27,7 +28,7 @@ def keyboard(screen) -> InlineKeyboardMarkup | None:
 def friendly_practice_error(e: BackendError) -> str:
     if e.status_code == 401:
         return "Your session expired. Please /login again."
-    if e.status_code in (400, 404):
+    if e.status_code in (400, 404, 422):
         return f"That didn't work: {e.detail}"
     if e.status_code == 503:
         return "The service is busy right now. Please try again in a minute."
@@ -101,6 +102,9 @@ async def practice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "This menu has expired. Send /practice to start again.", show_alert=True
         )
         return
+    if query.data.startswith("pw|"):
+        # the first request for a question is one LLM call; the feedback stays on screen meanwhile
+        await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
     try:
         screen = await asyncio.to_thread(session.handle, query.data)
     except FlowError as e:

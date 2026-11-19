@@ -10,7 +10,7 @@ on_answer silently records the already-returned grading into exam_results instea
 whole paper is done.
 """
 
-from telegram_bot.practice_flow import FlowError, Screen, clip, pretty_subject
+from telegram_bot.practice_flow import FlowError, Screen, clip, pretty_subject, why_wrong_button, why_wrong_text
 
 LETTERS = ("A", "B", "C", "D")
 BATCH = 5
@@ -32,6 +32,7 @@ class EsslceSession:
         self.review_due = False  # set only in practice "due for review" (spaced review)
         self._recommendation = None  # the weakest-area suggestion shown by _progress_screen, if any
         self.asking_question_id = None  # set only while mid-conversation in "Ask about this" chat
+        self.last_feedback = None  # (question_id, chosen, text, buttons) of the latest wrong answer
         self.chat_history: list = []  # [{"role": "user"|"assistant", "content": str}], capped, client-held
         self.queue, self.current = [], None
         self.answered_ids: set[int] = set()
@@ -76,6 +77,8 @@ class EsslceSession:
             return self.on_elaborate(int(rest[0]))
         if kind == "eq" and rest:
             return self.on_ask_start(int(rest[0]))
+        if kind == "ew" and len(rest) == 2:
+            return self.on_why_wrong(int(rest[0]), int(rest[1]))
         raise FlowError("This menu has expired. Send /esslce to start again.")
 
     # ---- menus -----------------------------------------------------------------------------------------------
@@ -481,14 +484,21 @@ class EsslceSession:
             image_caption = verdict
         extra_image = stem_image if (explanation_image and stem_image) else None
         extra_image_caption = "The question" if extra_image else None
+        buttons = [
+            [("🔍 Explain more", f"ee|{q['id']}")],
+            [("💬 Ask about this", f"eq|{q['id']}")],
+            [("Next question ➡", "en")],
+            [("■ Stop", "ex")],
+        ]
+        if not res["is_correct"]:
+            if res.get("why_wrong"):
+                text += why_wrong_text(res["why_wrong"])
+            else:
+                self.last_feedback = (q["id"], chosen, text, buttons)
+                buttons = [why_wrong_button("ew", q["id"], chosen)] + buttons
         return Screen(
             text,
-            [
-                [("🔍 Explain more", f"ee|{q['id']}")],
-                [("💬 Ask about this", f"eq|{q['id']}")],
-                [("Next question ➡", "en")],
-                [("■ Stop", "ex")],
-            ],
+            buttons,
             image_base64=image,
             image_caption=image_caption,
             extra_image_base64=extra_image,
@@ -536,6 +546,16 @@ class EsslceSession:
             image_base64=image,
             image_caption="🔍 Worked example" if image else None,
         )
+
+    def on_why_wrong(self, question_id: int, chosen: int) -> Screen:
+        """The feedback text with the note added, so nothing already shown is lost. Text only: the
+        explanation and question photos were already sent as their own messages and stay in the chat."""
+        if not self.last_feedback or self.last_feedback[:2] != (question_id, chosen):
+            raise FlowError("That answer is no longer on screen. Send /esslce to continue.")
+        _, _, text, buttons = self.last_feedback
+        note = self.api.esslce_why_wrong(self.user_id, question_id, chosen)
+        self.last_feedback = None
+        return Screen(text + why_wrong_text(note), buttons)
 
     def on_ask_start(self, question_id: int) -> Screen:
         self.asking_question_id = question_id

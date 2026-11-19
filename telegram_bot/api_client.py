@@ -266,6 +266,16 @@ def practice_answer(telegram_user_id: int, question_id: str, chosen_index: int) 
     )
 
 
+def practice_why_wrong(telegram_user_id: int, question_id: str, chosen_index: int) -> dict:
+    # a first request for a question is one LLM call; the backend gives up after a short retry budget
+    return _post(
+        telegram_user_id,
+        "/v1/practice/why-wrong",
+        {"question_id": question_id, "chosen_index": chosen_index},
+        timeout=90,
+    )
+
+
 def practice_progress(telegram_user_id: int, grade: int, subject: str) -> dict:
     return _get(
         telegram_user_id, "/v1/practice/progress", {"grade": grade, "subject": subject}
@@ -342,6 +352,15 @@ def esslce_answer(
         telegram_user_id,
         "/v1/esslce/answer",
         {"question_id": question_id, "chosen_index": chosen_index, "mode": mode},
+    )
+
+
+def esslce_why_wrong(telegram_user_id: int, question_id: int, chosen_index: int) -> dict:
+    return _post(
+        telegram_user_id,
+        "/v1/esslce/why-wrong",
+        {"question_id": question_id, "chosen_index": chosen_index},
+        timeout=90,
     )
 
 

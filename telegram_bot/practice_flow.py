@@ -30,6 +30,17 @@ def clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
 
 
+def why_wrong_text(note: dict) -> str:
+    """The backend's note on why the picked wrong option looked right, as lines for a feedback message."""
+    letter = LETTERS[note["chosen_index"]]
+    return f"\n\n🤔 Why {letter} looked right: {clip(note['tempting'], 450)}\nWhy it's wrong: {clip(note['wrong'], 450)}"
+
+
+def why_wrong_button(prefix: str, question_id, chosen: int) -> list:
+    """A one-button row that asks the backend for that note, for when it was not stored yet."""
+    return [(f"🤔 Why did {LETTERS[chosen]} look right?", f"{prefix}|{question_id}|{chosen}")]
+
+
 def format_page(citation: dict) -> str:
     parts = [citation.get("textbook"), citation.get("unit")]
     out = ", ".join(p for p in parts if p)
@@ -45,6 +56,7 @@ class PracticeSession:
         self.queue, self.current = [], None
         self.answered_ids: set[str] = set()
         self.answered = self.correct = 0
+        self.last_feedback = None  # (question_id, chosen, text, buttons) of the latest wrong answer
 
     # ---- entry -----------------------------------------------------------------------------------------------
     def start(self) -> Screen:
@@ -98,6 +110,8 @@ class PracticeSession:
             return self.on_next()
         if kind == "pr" and rest:
             return self.on_report(rest[0])
+        if kind == "pw" and len(rest) == 2:
+            return self.on_why_wrong(rest[0], int(rest[1]))
         if kind == "px":
             return self.on_stop()
         raise FlowError("This menu has expired. Send /practice to start again.")
@@ -222,13 +236,25 @@ class PracticeSession:
             + f"\n\nWhy: {clip(res['explanation'], 600)}\nBook: {format_page(res['citation'])}"
         )
         self.current = None
-        return Screen(
-            text,
-            [
-                [("Next question ➡", "pn")],
-                [("⚠ Report this question", f"pr|{question_id}"), ("■ Stop", "px")],
-            ],
-        )
+        buttons = [
+            [("Next question ➡", "pn")],
+            [("⚠ Report this question", f"pr|{question_id}"), ("■ Stop", "px")],
+        ]
+        if res["is_correct"]:
+            return Screen(text, buttons)
+        if res.get("why_wrong"):
+            return Screen(text + why_wrong_text(res["why_wrong"]), buttons)
+        self.last_feedback = (question_id, chosen, text, buttons)
+        return Screen(text, [why_wrong_button("pw", question_id, chosen)] + buttons)
+
+    def on_why_wrong(self, question_id: str, chosen: int) -> Screen:
+        """The same feedback message with the note added, so nothing already shown is lost."""
+        if not self.last_feedback or self.last_feedback[:2] != (question_id, chosen):
+            raise FlowError("That answer is no longer on screen. Send /practice to continue.")
+        _, _, text, buttons = self.last_feedback
+        note = self.api.practice_why_wrong(self.user_id, question_id, chosen)
+        self.last_feedback = None
+        return Screen(text + why_wrong_text(note), buttons)
 
     def on_next(self) -> Screen:
         if not self.queue:

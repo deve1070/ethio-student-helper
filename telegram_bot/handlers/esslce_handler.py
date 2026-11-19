@@ -141,6 +141,9 @@ async def esslce_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.edit_message_text("Working it out...")
         except BadRequest:
             pass
+    elif query.data.startswith("ew|"):
+        # the first request for a question is one LLM call; the feedback stays on screen meanwhile
+        await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
     try:
         screen = await asyncio.to_thread(session.handle, query.data)
     except FlowError as e:

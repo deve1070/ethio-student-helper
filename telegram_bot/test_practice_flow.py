@@ -97,7 +97,18 @@ class FakeApi:
                 "unit": "Unit 4: Periodic Classification of Elements",
                 "page": "127",
             },
+            "why_wrong": self._note(idx) if self.stored_note and idx != key else None,
         }
+
+    stored_note = False  # True: /answer already carries the note, as when it is stored on the question
+    why_calls = 0
+
+    def _note(self, idx):
+        return {"chosen_index": idx, "tempting": "It repeats a word from the question.", "wrong": "That word is about something else."}
+
+    def practice_why_wrong(self, uid, qid, idx):
+        self.why_calls += 1
+        return self._note(idx)
 
     def practice_report(self, uid, qid, reason=None):
         self.reports.append(qid)
@@ -225,6 +236,17 @@ assert (
 assert (
     s.handle(f"pa|{qid0}|2") is None and len(api.answers) == 1
 )  # a double tap is ignored and not counted twice
+# no note stored yet: a button asks for it, and the note is added under the same feedback
+assert res.buttons[0] == [("🤔 Why did C look right?", f"pw|{qid0}|2")], res.buttons[0]
+why = s.handle(f"pw|{qid0}|2")
+check_limits(why)
+assert why.text.startswith(res.text) and "🤔 Why C looked right: It repeats a word from the question.\nWhy it's wrong: That word is about something else." in why.text, why.text
+assert why.buttons == res.buttons[1:] and api.why_calls == 1  # the button is gone, the rest stay
+try:
+    s.handle(f"pw|{qid0}|2")  # tapped again on a message that already shows it
+    raise SystemExit("should raise")
+except FlowError:
+    pass
 try:
     s.handle(f"pa|{uuid.uuid4()}|1")
     raise SystemExit("should raise")
@@ -235,6 +257,7 @@ scr = s.handle("pn")
 assert "Question 2" in scr.text
 res = s.handle(f"pa|{s.current['id']}|2")
 assert res.text.startswith("✅ Correct!") and "(your answer)" not in res.text
+assert "Why did" not in str(res.buttons) and "🤔" not in res.text  # nothing to explain when right
 assert (s.answered, s.correct) == (2, 1)
 # answering without a current question, or a stale button, is refused
 try:
@@ -267,6 +290,15 @@ assert (
     and "/progress" in stop.text
     and stop.buttons == []
 )
+
+# ---- a note already stored on the question comes with the answer: shown at once, no button
+api_n = FakeApi([[make_question(0)]])
+api_n.stored_note = True
+sn = PracticeSession(api_n, 7)
+for step in ("pg|9", "ps|0", "pu|all"):
+    sn.handle(step)
+res = sn.handle(f"pa|{sn.current['id']}|3")
+assert "🤔 Why D looked right:" in res.text and "pw|" not in str(res.buttons) and api_n.why_calls == 0, res
 
 # ---- report: the question is pulled and the student continues
 api2 = FakeApi([[make_question(i) for i in range(3)], []])
