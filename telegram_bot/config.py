@@ -65,3 +65,8 @@ CHANNEL_POSTS_ON = os.environ.get("CHANNEL_POSTS", "on").strip().lower() not in 
 CHANNEL_POST_TIME = os.environ.get("CHANNEL_POST_TIME", "19:00")  # daily quiz; feature posts follow it
 # the days a feature post follows the quiz, e.g. "tue,thu,sat"
 CHANNEL_FEATURE_DAYS = os.environ.get("CHANNEL_FEATURE_DAYS", "tue,thu,sat")
+
+# Daily nudges (growth.py): the bot sends each linked student at most one message a day, at this time
+NUDGE_TIME = os.environ.get("NUDGE_TIME", "17:30")
+# Who students contact for a class group price, e.g. "@your_username"; left out of posts when empty
+SUPPORT_CONTACT = os.environ.get("SUPPORT_CONTACT", "").strip()

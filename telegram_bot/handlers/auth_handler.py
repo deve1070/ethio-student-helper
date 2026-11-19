@@ -64,7 +64,7 @@ async def _do_login(
     contains ONLY the password (not identifier+password together like the old one-liner) -
     strictly less plaintext password exposure left in the chat than before this flow existed."""
     try:
-        await asyncio.to_thread(api_client.link_account, telegram_user_id, identifier, password)
+        linked = await asyncio.to_thread(api_client.link_account, telegram_user_id, identifier, password)
     except BackendError:
         await update.message.reply_text(
             "Login failed — check your phone/email and password and try again."
@@ -77,6 +77,14 @@ async def _do_login(
             except Exception:
                 pass  # best-effort; not fatal if the bot lacks delete permission
 
+    if linked.get("trial_ends_at"):
+        gift = (
+            f"🎁 Welcome gift: everything is unlocked free until {linked['trial_ends_at'][:10]}. "
+            "Practise every day and see how far you get."
+        )
+        if linked.get("private_group_url"):
+            gift += f"\n\nJoin the evening group practice too: {linked['private_group_url']}"
+        await update.message.reply_text(gift)
     await update.message.reply_text(
         "Logged in! Try:\n"
         "/practice  (multiple-choice questions)\n"

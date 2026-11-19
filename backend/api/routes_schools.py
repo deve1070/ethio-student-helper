@@ -3,6 +3,8 @@ admins add schools and name ambassadors from the bot; the bot reads the weekly r
 
 from auth.dependencies import get_current_user, require_admin, require_bot_internal_token
 from auth.identifiers import normalize_identifier
+from auth.telegram_notify import send_text
+from config.settings import settings
 from db.models import School, User
 from db.session import get_db
 from fastapi import APIRouter, Depends, HTTPException
@@ -61,6 +63,13 @@ def make_ambassador(body: AmbassadorRequest, db: Session = Depends(get_db), _adm
     student.is_ambassador = True
     student.school_id = school.id
     db.commit()
+    send_text(
+        db,
+        student,
+        f"🎓 You're now the Ethiopian Student Helper ambassador for {school.name}. Share your code "
+        f"{student.referral_code}: students who sign up with it join {school.name} on the weekly top-schools "
+        f"ranking, and you earn {settings.REFERRAL_REWARD_ETB:g} ETB for each one who subscribes.",
+    )
     return {"student_name": student.full_name or identifier, "school": school.name, "referral_code": student.referral_code}
 
 

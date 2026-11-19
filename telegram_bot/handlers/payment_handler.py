@@ -254,7 +254,8 @@ async def payout_review_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/grant <phone or email> [days]"""
+    """/grant <phone or email> [more phones or emails...] [days]: several at once for a class that
+    paid a group price together."""
     telegram_user_id = update.effective_user.id
     if not api_client.is_logged_in(telegram_user_id):
         await update.message.reply_text("Please /login first with your phone/email and password.")
@@ -264,18 +265,23 @@ async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if len(args) >= 2 and args[-1].isdigit():
         days = int(args[-1])
         args = args[:-1]
-    identifier = " ".join(args).strip()
-    if not identifier:
-        await update.message.reply_text("Usage: /grant <phone or email> [days]\nExample: /grant 0912345678 180")
+    identifiers = [a.strip(",; ") for a in args if a.strip(",; ")]
+    if not identifiers:
+        await update.message.reply_text(
+            "Usage: /grant <phone or email> [more...] [days]\nExamples: /grant 0912345678 180\n"
+            "/grant 0911111111 0922222222 0933333333 365  (a whole class)"
+        )
         return
-    try:
-        result = await asyncio.to_thread(api_client.grant_subscription, telegram_user_id, identifier, days)
-    except BackendError as e:
-        if e.status_code == 403:
-            await update.message.reply_text("This command is for admins only.")
-        else:
-            await update.message.reply_text(f"Couldn't grant access: {e.detail}")
-        return
-    await update.message.reply_text(
-        f"Done. {result['student_name']} has free access until {result['expires_at'][:10]}. They've been told on Telegram if linked."
-    )
+    lines = []
+    for identifier in identifiers:
+        try:
+            result = await asyncio.to_thread(api_client.grant_subscription, telegram_user_id, identifier, days)
+        except BackendError as e:
+            if e.status_code == 403:
+                await update.message.reply_text("This command is for admins only.")
+                return
+            lines.append(f"✗ {identifier}: {e.detail}")
+            continue
+        lines.append(f"✓ {result['student_name']}: free access until {result['expires_at'][:10]}")
+    lines.append("Students linked to the bot have been told on Telegram.")
+    await update.message.reply_text("\n".join(lines))

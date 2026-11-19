@@ -31,6 +31,7 @@ from telegram_bot.config import (
     CHANNEL_FEATURE_DAYS,
     CHANNEL_POST_TIME,
     CHANNEL_POSTS_ON,
+    SUPPORT_CONTACT,
 )
 from telegram_bot.practice_flow import clip, pretty_subject
 
@@ -135,6 +136,28 @@ def feature_text(index: int, config: dict) -> str:
     )
 
 
+SCHOOLS_DAY = "sun"  # the weekly top-schools post follows Sunday's quiz
+
+
+def schools_text(ranking: list, config: dict) -> str:
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏫 Top schools this week, by questions practised:"]
+    for i, s in enumerate(ranking):
+        mark = medals[i] if i < len(medals) else f"{i + 1}."
+        lines.append(f"{mark} {s['school']}: {s['answered']} questions, {s['active_students']} student(s)")
+    lines.append(
+        "\nIs your school missing? Pick your school on your Profile in the app, and every question you "
+        "answer counts for it."
+    )
+    group = (
+        f"\n👥 Class deal: {config['group_min_students']} or more students from one school subscribe together "
+        f"for {_number(config['group_price_etb'])} ETB each instead of {_number(config['subscription_price_etb'])}."
+    )
+    group += f" Message {SUPPORT_CONTACT} to arrange it." if SUPPORT_CONTACT else " Ask your school's ambassador."
+    lines.append(group)
+    return "\n".join(lines)
+
+
 def parse_days(raw: str) -> tuple[str, ...]:
     days = tuple(d for d in (part.strip().lower()[:3] for part in raw.split(",")) if d in WEEKDAYS)
     return tuple(dict.fromkeys(days))  # drop repeats, keep order
@@ -199,11 +222,24 @@ async def post_today(context: ContextTypes.DEFAULT_TYPE, force_feature: bool = F
         if feature_day is not None and (feature_day == today or force_feature):
             text = feature_text(feature_index(feature_day, days), config)
             await context.bot.send_message(CHANNEL_CHAT_ID, text, reply_markup=feature_keyboard(config))
+        if WEEKDAYS[today.weekday()] == SCHOOLS_DAY:
+            await post_schools(context.bot, CHANNEL_CHAT_ID, config)
     except TelegramError as e:
         # most often: the bot is not an admin of the channel, or CHANNEL_CHAT_ID is wrong
         logger.warning("Channel post to %s refused by Telegram: %s", CHANNEL_CHAT_ID, e)
         return f"Telegram refused it ({e}). Check the bot is an admin of the channel with \"Post messages\"."
     return None if posted_quiz else "no exam question fits a quiz poll right now"
+
+
+async def post_schools(bot, chat_id, config: dict) -> None:
+    """The weekly top-schools post; skipped while no school has any practice."""
+    try:
+        ranking = await asyncio.to_thread(api_client.school_ranking)
+    except BackendError as e:
+        logger.warning("Top-schools post skipped (%s %s)", e.status_code, e.detail)
+        return
+    if ranking:
+        await bot.send_message(chat_id, schools_text(ranking, config), reply_markup=feature_keyboard(config))
 
 
 # ---- admin: /channel_stats ---------------------------------------------------------------------------------

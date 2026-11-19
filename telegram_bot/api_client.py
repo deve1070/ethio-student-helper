@@ -53,7 +53,9 @@ def logout(telegram_user_id: int) -> None:
     _store.get_store().drop_token(telegram_user_id)
 
 
-def link_account(telegram_user_id: int, identifier: str, password: str) -> None:
+def link_account(telegram_user_id: int, identifier: str, password: str) -> dict:
+    """Links this Telegram account and saves the login. The reply's trial_ends_at is set when this
+    first link started the free trial."""
     response = httpx.post(
         f"{BACKEND_BASE_URL}/v1/auth/telegram-link",
         json={
@@ -64,7 +66,9 @@ def link_account(telegram_user_id: int, identifier: str, password: str) -> None:
         timeout=15,
     )
     _raise_for_status(response)
-    _store.get_store().set_token(telegram_user_id, response.json()["access_token"])
+    body = response.json()
+    _store.get_store().set_token(telegram_user_id, body["access_token"])
+    return body
 
 
 def explain(telegram_user_id: int, grade: int, subject: str, question: str) -> dict:
@@ -406,6 +410,59 @@ def channel_question_of_the_day() -> dict:
     )
     _raise_for_status(response)
     return response.json()
+
+
+def profile(telegram_user_id: int) -> dict:
+    return _get(telegram_user_id, "/v1/auth/me", {})
+
+
+# ---- growth: nudges, share cards, inline questions, schools (backend api/routes_growth.py,
+# routes_channel.py, routes_schools.py) ---------------------------------------------------------------------
+def due_nudges() -> list:
+    response = httpx.post(f"{BACKEND_BASE_URL}/v1/growth/nudges", headers=_bot_headers(), timeout=120)
+    _raise_for_status(response)
+    return response.json()["nudges"]
+
+
+def set_nudges_off(telegram_user_id: int, off: bool) -> dict:
+    return _post(telegram_user_id, "/v1/growth/nudges-setting", {"off": off})
+
+
+def share_card(telegram_user_id: int, kind: str, challenge_id: int | None = None) -> dict:
+    params = {"kind": kind, **({"challenge_id": challenge_id} if challenge_id else {})}
+    return _get(telegram_user_id, "/v1/growth/share", params)
+
+
+def inline_questions(text: str) -> list:
+    response = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/channel/inline-questions", params={"q": text}, headers=_bot_headers(), timeout=8
+    )
+    _raise_for_status(response)
+    return response.json()
+
+
+def answer_key(question_id: int) -> dict:
+    response = httpx.get(f"{BACKEND_BASE_URL}/v1/channel/answer-key/{question_id}", headers=_bot_headers(), timeout=10)
+    _raise_for_status(response)
+    return response.json()
+
+
+def school_ranking() -> list:
+    response = httpx.get(f"{BACKEND_BASE_URL}/v1/schools/weekly-ranking", headers=_bot_headers(), timeout=30)
+    _raise_for_status(response)
+    return response.json()["schools"]
+
+
+def add_school(telegram_user_id: int, name: str) -> dict:
+    return _post(telegram_user_id, "/v1/schools", {"name": name})
+
+
+def make_ambassador(telegram_user_id: int, identifier: str, school: str) -> dict:
+    return _post(telegram_user_id, "/v1/schools/ambassador", {"identifier": identifier, "school": school})
+
+
+def schools_overview(telegram_user_id: int) -> dict:
+    return _get(telegram_user_id, "/v1/schools/overview", {})
 
 
 def signup_sources(telegram_user_id: int, days: int = 30) -> dict:

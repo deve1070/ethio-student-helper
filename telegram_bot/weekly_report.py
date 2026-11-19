@@ -60,6 +60,7 @@ def report_screen(r: dict) -> Screen:
             buttons.append([("Practise this unit ➡", f"wp|{weakest['subject']}|{weakest['unit_index']}")])
     if not buttons:
         buttons.append([("Keep practising ➡", "m|esslce")])
+    buttons.append([("📤 Share my week", "sh|week")])
     return Screen("\n".join(lines), buttons)
 
 

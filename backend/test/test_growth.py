@@ -44,6 +44,7 @@ from payments.subscription import grant_or_extend_subscription  # noqa: E402
 from practice.selection import today_local  # noqa: E402
 
 A.limiter.enabled = False
+S.send_text = lambda *a, **k: True  # never message a real Telegram account from a test
 failures = 0
 
 

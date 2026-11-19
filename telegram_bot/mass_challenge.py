@@ -387,8 +387,13 @@ async def reveal(context: ContextTypes.DEFAULT_TYPE) -> None:
             f"⏱ {prefix}That's today's {board['total_questions']} questions! Nobody answered this "
             "time - tomorrow's another chance."
         )
+    share = (
+        InlineKeyboardMarkup([[InlineKeyboardButton("📤 Share my result", callback_data=f"sh|mass|{challenge_id}")]])
+        if board["entries"]
+        else None
+    )
     await _send_with_retry(
-        lambda: context.bot.send_message(TELEGRAM_PRIVATE_GROUP_ID, results, message_thread_id=topic_id)
+        lambda: context.bot.send_message(TELEGRAM_PRIVATE_GROUP_ID, results, message_thread_id=topic_id, reply_markup=share)
     )
     await _post_answer_key(context, challenge_id, context.job.data.get("question_ids", []), prefix, topic_id)
     if context.job.data.get("unit"):
