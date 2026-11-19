@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # What a student earns when someone they referred makes a first payment. Each reward is recorded
     # when it is earned (payments/referral.py), so changing this affects only later referrals.
     REFERRAL_REWARD_ETB: float = 50.0
+    # Free trial of everything, started when a student first links the Telegram bot (growth/trial.py); 0 turns it off
+    TRIAL_DAYS: int = 7
+    # A class that subscribes together (an ambassador collects, an admin grants each student with
+    # /grant): the price per student, and how many students make a group. Shown in the bot's posts.
+    GROUP_PRICE_ETB: float = 250.0
+    GROUP_MIN_STUDENTS: int = 10
 
     # The public Telegram channel every student is invited to, and the bot (both public links). The
     # subscriber-only practice group is TELEGRAM_PRIVATE_GROUP_URL below and is never shown to

@@ -82,6 +82,13 @@ class User(Base):
     # Where the student came from when they signed up, from the web app's ?src= link tag (e.g.
     # "channel" for the channel posts' buttons); NULL when they arrived without one.
     signup_source: Mapped[str | None] = mapped_column(String(32))
+    # Bot messages at chosen moments (growth/nudges.py); a student can turn them off from the bot.
+    nudges_off: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
+    # The student's school, for the weekly top-schools post (growth/schools.py). An ambassador is
+    # a student an admin put in charge of bringing their school in; students who sign up with an
+    # ambassador's referral code join the ambassador's school.
+    school_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("schools.id", ondelete="SET NULL"))
+    is_ambassador: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -410,3 +417,40 @@ class Payment(Base):
     # explicit foreign_keys: payments now has two FKs to users (user_id, reviewed_by) - without
     # this, SQLAlchemy can't tell which one backs the student-facing "whose payment is this" side
     user: Mapped["User | None"] = relationship(back_populates="payments", foreign_keys=[user_id])
+
+
+class School(Base):
+    """A school students can belong to (growth/schools.py). Added by an admin from the bot."""
+
+    __tablename__ = "schools"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FreeTrial(Base):
+    """One free trial ever per phone/email and per Telegram account (growth/trial.py). Not linked to
+    the user by a deleting foreign key: the record outlives the account, so deleting an account and
+    signing up again with the same number does not give a second trial."""
+
+    __tablename__ = "free_trials"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    identifier: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)  # normalized phone or email
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NudgeSent(Base):
+    """A bot message sent at a chosen moment (growth/nudges.py), so each is sent once and a student
+    gets at most one a day. `key` names the moment, e.g. "countdown:30" or "inactive:2026-11-16"."""
+
+    __tablename__ = "nudges_sent"
+    __table_args__ = (UniqueConstraint("user_id", "key", name="uq_nudge_user_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    sent_on: Mapped[date] = mapped_column(Date, nullable=False)  # local date

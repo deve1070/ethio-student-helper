@@ -34,6 +34,8 @@ def grant_or_extend_subscription(db: Session, user_id: UUID, duration: timedelta
     )
     if sub is not None and sub.current_period_end and _as_utc(sub.current_period_end) > now:
         sub.current_period_end = _as_utc(sub.current_period_end) + duration
+        if sub.plan == "trial":
+            sub.plan = "yearly"  # paid or granted during the free trial: no longer a trial (growth/trial.py)
         return sub
 
     sub = Subscription(

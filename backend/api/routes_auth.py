@@ -15,6 +15,7 @@ from auth.identifiers import normalize_email, normalize_identifier, normalize_ph
 from auth.referral import generate_referral_code
 from auth.security import create_access_token, hash_password, verify_password
 from auth.telegram_notify import send_text
+from growth.trial import start_trial_if_eligible
 from payments.entitlement import has_active_subscription
 from config.constants import (
     COMMON_SUBJECTS,
@@ -23,7 +24,7 @@ from config.constants import (
     subject_visible,
 )
 from config.settings import settings
-from db.models import PasswordResetCode, TelegramLink, User
+from db.models import PasswordResetCode, School, TelegramLink, User
 from db.session import get_db
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
@@ -75,6 +76,7 @@ def signup(request: Request, body: SignupRequest, db: Session = Depends(get_db))
         )
 
     referred_by_user_id = None
+    referrer_school = None
     if body.referral_code:
         referrer = (
             db.query(User)
@@ -84,6 +86,7 @@ def signup(request: Request, body: SignupRequest, db: Session = Depends(get_db))
         if referrer is None:
             raise HTTPException(status_code=400, detail="That referral code doesn't exist.")
         referred_by_user_id = referrer.id
+        referrer_school = referrer.school_id if referrer.is_ambassador else None
 
     user = User(
         phone_number=phone_number,
@@ -94,6 +97,7 @@ def signup(request: Request, body: SignupRequest, db: Session = Depends(get_db))
         referral_code=generate_referral_code(db),
         referred_by_user_id=referred_by_user_id,
         signup_source=clean_signup_source(body.signup_source),
+        school_id=referrer_school,  # an ambassador's code brings the student into their school
     )
     db.add(user)
     db.commit()
@@ -137,11 +141,16 @@ class TelegramLinkRequest(BaseModel):
     password: str
 
 
-@router.post("/telegram-link", response_model=TokenResponse)
+class TelegramLinkResponse(TokenResponse):
+    trial_ends_at: datetime | None = None  # set only when this link started the free trial
+    private_group_url: str | None = None  # with a new trial: the evening practice group to join
+
+
+@router.post("/telegram-link", response_model=TelegramLinkResponse)
 @limiter.limit("5/minute")  # same credential check as /login, same brute-force exposure
 def telegram_link(
     request: Request, body: TelegramLinkRequest, db: Session = Depends(get_db)
-) -> TokenResponse:
+) -> TelegramLinkResponse:
     user = _find_user_by_identifier(db, body.identifier)
     if (
         user is None
@@ -157,9 +166,15 @@ def telegram_link(
         link.user_id = (
             user.id
         )  # re-linking to a different account overwrites, doesn't duplicate
+    trial_ends = start_trial_if_eligible(db, user, body.telegram_user_id)
     db.commit()
 
-    return TokenResponse(access_token=create_access_token(user.id), user_id=user.id)
+    return TelegramLinkResponse(
+        access_token=create_access_token(user.id),
+        user_id=user.id,
+        trial_ends_at=trial_ends,
+        private_group_url=(settings.TELEGRAM_PRIVATE_GROUP_URL or None) if trial_ends else None,
+    )
 
 
 class PasswordResetRequestBody(BaseModel):
@@ -297,6 +312,8 @@ class PublicConfigResponse(BaseModel):
     referral_reward_etb: float
     payment_telebirr_number: str
     payment_cbe_account: str
+    group_price_etb: float
+    group_min_students: int
 
 
 @router.get("/public-config", response_model=PublicConfigResponse)
@@ -311,6 +328,8 @@ def public_config() -> PublicConfigResponse:
         referral_reward_etb=settings.REFERRAL_REWARD_ETB,
         payment_telebirr_number=settings.PAYMENT_TELEBIRR_NUMBER,
         payment_cbe_account=settings.PAYMENT_CBE_ACCOUNT,
+        group_price_etb=settings.GROUP_PRICE_ETB,
+        group_min_students=settings.GROUP_MIN_STUDENTS,
     )
 
 
@@ -342,6 +361,10 @@ class ProfileResponse(BaseModel):
     telegram_bot_url: str | None
     private_group_url: str | None  # the subscriber-only practice group; None unless subscribed
     telegram_linked: bool
+    school_id: int | None = None
+    school_name: str | None = None
+    is_ambassador: bool = False
+    nudges_off: bool = False
 
 
 def _profile_response(db: Session, user: User) -> ProfileResponse:
@@ -363,6 +386,10 @@ def _profile_response(db: Session, user: User) -> ProfileResponse:
             settings.TELEGRAM_PRIVATE_GROUP_URL or None if has_active_subscription(db, user.id) else None
         ),
         telegram_linked=db.query(TelegramLink).filter(TelegramLink.user_id == user.id).first() is not None,
+        school_id=user.school_id,
+        school_name=db.get(School, user.school_id).name if user.school_id else None,
+        is_ambassador=user.is_ambassador,
+        nudges_off=user.nudges_off,
     )
 
 
@@ -377,6 +404,7 @@ class UpdateProfileRequest(BaseModel):
     subjects_selected: list[str] | None = Field(None, max_length=12)
     exam_date: date | None = None
     daily_goal_minutes: int | None = Field(None, ge=15, le=480)
+    school_id: int | None = None  # sent as null to clear; left out to keep
 
 
 @router.patch("/me", response_model=ProfileResponse)
@@ -403,6 +431,10 @@ def update_me(
         user.exam_date = body.exam_date
     if body.daily_goal_minutes is not None:
         user.daily_goal_minutes = body.daily_goal_minutes
+    if "school_id" in body.model_fields_set:
+        if body.school_id is not None and db.get(School, body.school_id) is None:
+            raise HTTPException(status_code=400, detail="That school is not in the list.")
+        user.school_id = body.school_id
     if user.onboarding_completed_at is None:
         user.onboarding_completed_at = datetime.now(timezone.utc)
     db.commit()
