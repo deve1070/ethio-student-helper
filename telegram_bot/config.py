@@ -46,3 +46,22 @@ def _topic_id(name: str) -> int | None:
 # to the natural topic, the one general "mass practice" space that already existed.
 MASS_CHALLENGE_NATURAL_TOPIC_ID = _topic_id("MASS_CHALLENGE_NATURAL_TOPIC_ID")
 MASS_CHALLENGE_SOCIAL_TOPIC_ID = _topic_id("MASS_CHALLENGE_SOCIAL_TOPIC_ID")
+
+
+# ---- regular posts to the public channel (channel_posts.py) --------------------------------------------------
+def _channel_chat() -> str:
+    """Where the posts go: CHANNEL_CHAT_ID if set (e.g. "@ethio_student_helper" or "-100..."), otherwise
+    the public channel named by TELEGRAM_CHANNEL_URL. An invite link (t.me/+...) names no channel, so
+    nothing is posted until CHANNEL_CHAT_ID is set."""
+    explicit = os.environ.get("CHANNEL_CHAT_ID", "").strip()
+    if explicit:
+        return explicit
+    name = TELEGRAM_CHANNEL_URL.rstrip("/").split("/")[-1] if "t.me/" in TELEGRAM_CHANNEL_URL else ""
+    return f"@{name}" if name and not name.startswith(("+", "joinchat")) else ""
+
+
+CHANNEL_CHAT_ID = _channel_chat()
+CHANNEL_POSTS_ON = os.environ.get("CHANNEL_POSTS", "on").strip().lower() not in ("off", "0", "false", "no")
+CHANNEL_POST_TIME = os.environ.get("CHANNEL_POST_TIME", "19:00")  # daily quiz; feature posts follow it
+# the days a feature post follows the quiz, e.g. "tue,thu,sat"
+CHANNEL_FEATURE_DAYS = os.environ.get("CHANNEL_FEATURE_DAYS", "tue,thu,sat")

@@ -399,6 +399,20 @@ def _bot_headers() -> dict:
     return {"Authorization": f"Bearer {BOT_INTERNAL_TOKEN}"}
 
 
+def channel_question_of_the_day() -> dict:
+    """A past-exam question that fits a Telegram quiz poll; the backend marks it posted."""
+    response = httpx.post(
+        f"{BACKEND_BASE_URL}/v1/channel/question-of-the-day", headers=_bot_headers(), timeout=30
+    )
+    _raise_for_status(response)
+    return response.json()
+
+
+def signup_sources(telegram_user_id: int, days: int = 30) -> dict:
+    """Admin only: signups by where they came from (403 for anyone else)."""
+    return _get(telegram_user_id, "/v1/auth/signup-sources", {"days": days})
+
+
 def mass_challenge_today() -> dict:
     response = httpx.post(
         f"{BACKEND_BASE_URL}/v1/mass-challenge/today", headers=_bot_headers(), timeout=20

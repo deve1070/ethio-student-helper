@@ -13,7 +13,7 @@ from telegram.ext import (
     filters,
 )
 
-from telegram_bot import mass_challenge, reminders, weekly_report
+from telegram_bot import channel_posts, mass_challenge, reminders, weekly_report
 from telegram_bot.i18n import tr
 from telegram_bot import store as bot_store
 from telegram_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_URL
@@ -187,6 +187,10 @@ async def post_init(application: Application) -> None:
     mass_challenge.schedule_sweep(application.job_queue, tz)
     mass_challenge.schedule_streak_nudge(application.job_queue, tz)
     weekly_report.schedule_weekly_report(application.job_queue, tz)
+    if channel_posts.schedule_channel_posts(application.job_queue, tz):
+        logger.info("Scheduled daily channel posts to %s", channel_posts.CHANNEL_CHAT_ID)
+    else:
+        logger.info("Channel posts are OFF (CHANNEL_POSTS=off, or no public channel to post to)")
     await mass_challenge.resume_after_restart(application)
 
 
@@ -213,6 +217,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("pending_payments", pending_payments_command))
     app.add_handler(CommandHandler("pending_payouts", pending_payouts_command))
     app.add_handler(CommandHandler("grant", grant_command))
+    app.add_handler(CommandHandler("channel_stats", channel_posts.channel_stats_command))
+    app.add_handler(CallbackQueryHandler(channel_posts.post_now_callback, pattern=r"^cp\|"))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("language", language_command))
     app.add_handler(CallbackQueryHandler(language_callback, pattern=r"^lang\|"))
