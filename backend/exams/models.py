@@ -134,6 +134,7 @@ class EsslceQuestion(Base):
     answer_index = Column(Integer)  # 0-3 in printed order; NULL until resolved
     answer_source = Column(String(32))  # "official_key" | "manual" | "ai_derived" ; never guessed
     explanation = Column(Text)
+    wrong_option_notes = Column(JSON)  # why each wrong option looked right; explanations/wrong_choice.py
     supporting_quote = Column(Text)  # verbatim quote an AI-derived answer was cited from,
     # for a human reviewer to check against the source; NULL for official_key/manual
     verification_code = Column(Text)  # for a calculation subject: the sympy/math code that was actually

@@ -132,6 +132,26 @@ c2.post("/v1/practice/answer", json={"question_id": bob_qs[2]["id"], "chosen_ind
 mist = c2.get("/v1/practice/mistakes", params={"grade": 9, "subject": "chemistry"}).json()
 assert [m["question_id"] for m in mist] == [bob_qs[0]["id"]], mist
 
+# ---- /why-wrong: why the picked wrong option looked right; generated once, stored on the question
+import json
+class FakeNoteLLM:
+    calls = 0
+    def chat(self, messages):
+        FakeNoteLLM.calls += 1; FakeNoteLLM.prompt = messages[0]["content"]
+        return {"choices": [{"message": {"content": json.dumps({L: {"tempting": f"{L} looks familiar.", "wrong": f"{L} is not it."} for L in "ABD"})}}]}
+R.note_llm = FakeNoteLLM
+wid = bob_qs[0]["id"]
+assert c2.post("/v1/practice/why-wrong", json={"question_id": wid, "chosen_index": 3}).status_code == 404   # Bob never picked D here
+assert c2.post("/v1/practice/why-wrong", json={"question_id": bob_qs[1]["id"], "chosen_index": 2}).status_code == 404  # answered right
+r = c2.post("/v1/practice/why-wrong", json={"question_id": wid, "chosen_index": 0})
+assert r.status_code == 200 and r.json() == {"chosen_index": 0, "tempting": "A looks familiar.", "wrong": "A is not it."}, r.text
+assert "Correct answer: C) c" in FakeNoteLLM.prompt and "quote " in FakeNoteLLM.prompt   # textbook sentence passed as grounding
+assert c2.post("/v1/practice/why-wrong", json={"question_id": wid, "chosen_index": 0}).json()["wrong"] == "A is not it." and FakeNoteLLM.calls == 1
+assert c2.get("/v1/practice/mistakes", params={"grade": 9, "subject": "chemistry"}).json()[0]["why_wrong"]["tempting"] == "A looks familiar."
+body = c2.post("/v1/practice/answer", json={"question_id": wid, "chosen_index": 1}).json()
+assert body["why_wrong"] == {"chosen_index": 1, "tempting": "B looks familiar.", "wrong": "B is not it."}, body   # stored notes cover every wrong option
+assert c2.post("/v1/practice/answer", json={"question_id": wid, "chosen_index": 2}).json()["why_wrong"] is None    # correct: no note
+
 # ---- review tool: approve / reject / fix a wrong key / skip / quit, and only approved questions reach students
 import importlib.util
 _spec = importlib.util.spec_from_file_location("rq", "scripts/review_questions.py")

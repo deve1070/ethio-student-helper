@@ -50,6 +50,8 @@ class QuizQuestion(Base):
     answer_index: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
     supporting_quote: Mapped[str] = mapped_column(Text, nullable=False)
+    # why each wrong option looked right; written on first demand (explanations/wrong_choice.py)
+    wrong_option_notes: Mapped[dict | None] = mapped_column(JSONB)
     difficulty: Mapped[str] = mapped_column(String, nullable=False, default="medium")
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
     source_vector_ids: Mapped[list[str] | None] = mapped_column(ARRAY(String))

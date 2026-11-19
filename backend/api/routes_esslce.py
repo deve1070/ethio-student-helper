@@ -19,6 +19,7 @@ from db.models import User
 from db.session import get_db
 from exams.latex_render import contains_latex_math, render_latex_png
 from exams.models import EsslceAttempt, EsslcePaper, EsslcePassage, EsslceQuestion, EsslceTopicLink
+from explanations.wrong_choice import WrongChoiceNote, as_response, esslce_context, get_or_create_note, note_for, note_llm
 from exams.store import (
     MIN_ATTEMPTS_FOR_SIGNAL,
     ask_about_question,
@@ -113,10 +114,16 @@ class AnswerResponse(BaseModel):
     explanation: str | None
     supporting_quote: str | None
     explanation_image_base64: str | None = None  # set only for a calculation-subject explanation that rendered
+    why_wrong: WrongChoiceNote | None = None  # only when the answer was wrong and a note is already stored
 
 
 class ElaborateRequest(BaseModel):
     question_id: int
+
+
+class WhyWrongRequest(BaseModel):
+    question_id: int
+    chosen_index: int = Field(..., ge=0, le=3)
 
 
 class Citation(BaseModel):
@@ -195,6 +202,7 @@ class MistakeItem(BaseModel):
     explanation_image_base64: str | None = None  # set only for a calculation-subject explanation that rendered
     unit: str | None
     skill: str | None
+    why_wrong: WrongChoiceNote | None = None  # only when a note is already stored
 
 
 @router.get("/mistakes", response_model=list[MistakeItem])
@@ -270,6 +278,7 @@ def mistakes(
                 explanation_image_base64=image_b64,
                 unit=unit_info[1] if unit_info else None,
                 skill=skill_strand(q) if unit_info is None else None,
+                why_wrong=as_response(note_for(q, q.stem, latest[qid][1]), latest[qid][1]),
             )
         )
         if len(out) >= min(count, 50):
@@ -730,7 +739,38 @@ def answer(
         explanation=question.explanation,
         supporting_quote=question.supporting_quote,
         explanation_image_base64=image_b64,
+        why_wrong=None if is_correct else as_response(
+            note_for(question, question.stem, request.chosen_index), request.chosen_index
+        ),
     )
+
+
+@router.post("/why-wrong", response_model=WrongChoiceNote)
+def why_wrong(
+    request: WhyWrongRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> WrongChoiceNote:
+    """Why the option this student picked looked right, and what is wrong with it. Stored on the
+    question after the first request, so it is written once for everyone (explanations/wrong_choice.py).
+    Only for an option the student actually picked and got wrong."""
+    question = db.get(EsslceQuestion, request.question_id)
+    if question is None or not eligible(question):
+        raise HTTPException(status_code=404, detail="Question not found or no longer available.")
+    picked = (
+        db.query(EsslceAttempt.id)
+        .filter(
+            EsslceAttempt.user_id == user.id,
+            EsslceAttempt.question_id == question.id,
+            EsslceAttempt.chosen_index == request.chosen_index,
+            EsslceAttempt.is_correct.is_(False),
+        )
+        .first()
+    )
+    if picked is None:
+        raise HTTPException(status_code=404, detail="You have not picked that option for this question.")
+    note = get_or_create_note(db, note_llm(), question, question.stem, request.chosen_index, esslce_context(question))
+    if note is None:
+        raise HTTPException(status_code=422, detail="Could not prepare this explanation right now. Try again later.")
+    return as_response(note, request.chosen_index)
 
 
 @router.post("/elaborate", response_model=ElaborateResponse)

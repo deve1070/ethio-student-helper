@@ -8,6 +8,7 @@ from config.constants import subject_visible
 from db.models import Textbook, User
 from db.models_practice import QuizAttempt, QuizQuestion, QuizReport
 from db.session import get_db
+from explanations.wrong_choice import WrongChoiceNote, as_response, get_or_create_note, note_for, note_llm, practice_context
 from fastapi import APIRouter, Depends, HTTPException
 from practice.progress import attempt_rows, attempt_timestamps
 from practice.selection import daily_trend, pick_questions, unit_progress
@@ -65,6 +66,7 @@ class AnswerResponse(BaseModel):
     explanation: str
     supporting_quote: str
     citation: AnswerCitation
+    why_wrong: WrongChoiceNote | None = None  # only when the answer was wrong and a note is already stored
 
 
 class MistakeItem(BaseModel):
@@ -75,6 +77,12 @@ class MistakeItem(BaseModel):
     correct_index: int
     explanation: str
     unit: str | None
+    why_wrong: WrongChoiceNote | None = None  # only when a note is already stored
+
+
+class WhyWrongRequest(BaseModel):
+    question_id: uuid.UUID
+    chosen_index: int = Field(..., ge=0, le=3)
 
 
 # ---- helpers --------------------------------------------------------------
@@ -278,7 +286,40 @@ def answer(
             unit=question.unit_or_chapter,
             page=_format_page(question.page_start, question.page_end),
         ),
+        why_wrong=None if is_correct else as_response(
+            note_for(question, question.question, request.chosen_index), request.chosen_index
+        ),
     )
+
+
+@router.post("/why-wrong", response_model=WrongChoiceNote)
+def why_wrong(
+    request: WhyWrongRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WrongChoiceNote:
+    """Why the option this student picked looked right, and what is wrong with it. Stored on the
+    question after the first request, so it is written once for everyone (explanations/wrong_choice.py).
+    Only for an option the student actually picked and got wrong."""
+    question = db.get(QuizQuestion, request.question_id)
+    if question is None or question.status != "active":
+        raise HTTPException(status_code=404, detail="Question not found.")
+    picked = (
+        db.query(QuizAttempt.id)
+        .filter(
+            QuizAttempt.user_id == user.id,
+            QuizAttempt.question_id == question.id,
+            QuizAttempt.chosen_index == request.chosen_index,
+            QuizAttempt.is_correct.is_(False),
+        )
+        .first()
+    )
+    if picked is None:
+        raise HTTPException(status_code=404, detail="You have not picked that option for this question.")
+    note = get_or_create_note(db, note_llm(), question, question.question, request.chosen_index, practice_context(question))
+    if note is None:
+        raise HTTPException(status_code=422, detail="Could not prepare this explanation right now. Try again later.")
+    return as_response(note, request.chosen_index)
 
 
 @router.get("/mistakes", response_model=list[MistakeItem])
@@ -321,6 +362,7 @@ def mistakes(
             correct_index=questions[qid].answer_index,
             explanation=questions[qid].explanation,
             unit=questions[qid].unit_or_chapter,
+            why_wrong=as_response(note_for(questions[qid], questions[qid].question, latest[qid][1]), latest[qid][1]),
         )
         for qid in wrong_ids
         if qid in questions

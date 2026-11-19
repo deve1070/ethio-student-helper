@@ -49,6 +49,7 @@ llm_state = {"response": json.dumps({"explanation": None})}
 
 class FakeLLM:
     def chat(self, messages):
+        llm_state["last_prompt"] = messages[-1]["content"]
         return {"choices": [{"message": {"content": llm_state["response"]}}]}
 
 
@@ -466,5 +467,41 @@ r = c.post("/v1/esslce/next", json={"subject": "mathematics", "paper_id": math_p
 by_id = {q["id"]: q for q in r.json()["questions"]}
 assert by_id[m_arrow.id]["stem_image_base64"], by_id[m_arrow.id]  # stem has LaTeX -> rendered
 assert by_id[m1.id]["stem_image_base64"] is None, by_id[m1.id]  # "2+2=?" has no LaTeX -> not rendered
+
+# ---- 11. /why-wrong: why the picked wrong option looked right, stored on the question for everyone -----------
+NOTES = {
+    L: {"tempting": f"{L} repeats a word from the passage.", "wrong": f"The passage does not say {L}."}
+    for L in "BCD"
+}
+r = c.post("/v1/esslce/why-wrong", json={"question_id": e1.id, "chosen_index": 1})
+assert r.status_code == 404, r.text  # this student never picked B for e1
+r = c.post("/v1/esslce/why-wrong", json={"question_id": m1.id, "chosen_index": 1})
+assert r.status_code == 404, r.text  # m1 was answered correctly - there is no wrong choice to explain
+
+llm_state["response"] = json.dumps(NOTES)
+r = c.post("/v1/esslce/why-wrong", json={"question_id": e1.id, "chosen_index": 2})
+b = r.json()
+assert r.status_code == 200 and b == {"chosen_index": 2, **NOTES["C"]}, r.text
+assert "Once upon a time..." in llm_state["last_prompt"]  # the reading passage is the source for its question
+assert "Correct answer: A) x" in llm_state["last_prompt"]
+
+llm_state["response"] = "not json"  # a second request must not call the model again
+r = c.post("/v1/esslce/why-wrong", json={"question_id": e1.id, "chosen_index": 2})
+assert r.status_code == 200 and r.json()["tempting"] == NOTES["C"]["tempting"], r.text
+
+r = c.post("/v1/esslce/answer", json={"question_id": e1.id, "chosen_index": 3, "mode": "practice"})
+assert r.json()["why_wrong"] == {"chosen_index": 3, **NOTES["D"]}, r.json()  # stored: shown straight away
+r = c.post("/v1/esslce/answer", json={"question_id": e1.id, "chosen_index": 0, "mode": "practice"})
+assert r.json()["why_wrong"] is None  # correct
+c.post("/v1/esslce/answer", json={"question_id": e1.id, "chosen_index": 1, "mode": "practice"})
+r = c.get("/v1/esslce/mistakes", params={"subject": "english"})
+e1_mistake = next(m for m in r.json() if m["question_id"] == e1.id)
+assert e1_mistake["why_wrong"] == {"chosen_index": 1, **NOTES["B"]}, e1_mistake
+
+r = c.post("/v1/esslce/answer", json={"question_id": e2.id, "chosen_index": 0, "mode": "practice"})
+assert r.json()["why_wrong"] is None  # nothing stored for e2 yet
+r = c.post("/v1/esslce/why-wrong", json={"question_id": e2.id, "chosen_index": 0})
+assert r.status_code == 422, r.text  # the model's reply was unusable: an error, nothing stored
+assert Session().get(EM.EsslceQuestion, e2.id).wrong_option_notes is None
 
 print("ESSLCE ROUTE TESTS PASSED")
