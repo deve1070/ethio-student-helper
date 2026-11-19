@@ -9,6 +9,7 @@
 // without importing this file back and creating a circular module dependency.
 import { ApiError, BASE, getToken, notifyUnauthorized, setToken } from "./apiAuth"
 import { streamGet, streamPost } from "./sse"
+import { signupSource } from "./signupSource"
 
 export * from "./apiAuth"
 
@@ -96,6 +97,7 @@ export interface UpdateProfileBody {
 export interface PublicConfig {
   telegram_channel_url: string | null
   telegram_bot_url: string | null
+  web_app_url: string
   subscription_price_etb: number
   referral_reward_etb: number
   payment_telebirr_number: string
@@ -113,7 +115,7 @@ export const auth = {
     full_name?: string
     grade_level?: number
     referral_code?: string
-  }) => post<TokenResponse>("/v1/auth/signup", body),
+  }) => post<TokenResponse>("/v1/auth/signup", { ...body, signup_source: signupSource() }),
   login: (identifier: string, password: string) =>
     post<TokenResponse>("/v1/auth/login", { identifier, password }),
   streams: () => get<StreamSubjects>("/v1/auth/streams"),
