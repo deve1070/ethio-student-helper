@@ -19,6 +19,7 @@ import { Button } from "../components/ui/Button"
 import { Card } from "../components/ui/Card"
 import { InstallAppCard } from "../components/ui/InstallAppCard"
 import { ReferralCard } from "../components/profile/ReferralCard"
+import { BotTipsSwitch, SchoolPicker } from "../components/profile/SettingsRows"
 import { useAuth } from "../lib/auth"
 import { payments } from "../lib/api"
 import { LanguageSwitch, useI18n } from "../lib/i18n"
@@ -156,6 +157,8 @@ export function ProfilePage() {
           </span>
           <LanguageSwitch />
         </div>
+        <SchoolPicker />
+        <BotTipsSwitch />
       </Section>
 
       <InstallAppCard />

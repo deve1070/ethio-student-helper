@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { GraduationCap } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Field, PasswordInput, TextInput, ErrorBanner } from "../../components/ui/Primitives"
@@ -17,7 +17,9 @@ export function SignupPage() {
   const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [grade, setGrade] = useState(12)
-  const [referralCode, setReferralCode] = useState("")
+  const [params] = useSearchParams()
+  // a shared link (a friend's card, a question sent from the bot) carries the friend's code as ?ref=
+  const [referralCode, setReferralCode] = useState(() => (params.get("ref") ?? "").trim().toUpperCase().slice(0, 16))
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 

@@ -86,6 +86,10 @@ export interface Profile {
   telegram_bot_url: string | null
   private_group_url: string | null
   telegram_linked: boolean
+  school_id: number | null
+  school_name: string | null
+  is_ambassador: boolean
+  nudges_off: boolean
 }
 export interface UpdateProfileBody {
   grade_level?: number
@@ -93,6 +97,7 @@ export interface UpdateProfileBody {
   subjects_selected?: string[]
   exam_date?: string
   daily_goal_minutes?: number
+  school_id?: number | null // null clears it
 }
 export interface PublicConfig {
   telegram_channel_url: string | null
@@ -583,6 +588,17 @@ export interface ReferralSummary {
   available_etb: number
   requests: ReferralPayout[]
 }
+export interface School {
+  id: number
+  name: string
+}
+export const schools = {
+  list: () => get<School[]>("/v1/schools"),
+}
+export const growth = {
+  setTips: (off: boolean) => post<{ off: boolean }>("/v1/growth/nudges-setting", { off }),
+}
+
 export const referrals = {
   summary: () => get<ReferralSummary>("/v1/referrals/payouts"),
   requestPayout: (body: { method: "telebirr" | "cbe"; account_number: string; account_name: string }) =>

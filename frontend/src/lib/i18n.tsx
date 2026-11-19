@@ -116,6 +116,17 @@ const AM: Record<string, string> = {
   "Your study plan is ready. Let's get started.": "የጥናት እቅድዎ ዝግጁ ነው። እንጀምር።",
   "Go to Dashboard": "ወደ መነሻ ገጽ",
 
+  // school and bot tips (Profile)
+  "Your school": "ትምህርት ቤትዎ",
+  Ambassador: "አምባሳደር",
+  "Not chosen": "አልተመረጠም",
+  "Couldn't save. Try again.": "ማስቀመጥ አልተቻለም። እንደገና ይሞክሩ።",
+  "Every question you answer counts for your school in the weekly ranking.":
+    "የሚመልሱት እያንዳንዱ ጥያቄ በሳምንታዊው ደረጃ ለትምህርት ቤትዎ ይቆጠራል።",
+  "Tips from the bot": "ከቦቱ የሚመጡ ምክሮች",
+  "Exam countdown and reminders when you've been away, at most one a day":
+    "የፈተና ቀን ቆጠራና ሲጠፉ የሚላኩ ማስታወሻዎች፣ በቀን ቢበዛ አንድ",
+
   // why the picked wrong option looked right
   "Working out why {letter} looked right...": "{letter} ለምን ትክክል እንደመሰለ እየተዘጋጀ ነው...",
   "Still working on it...": "አሁንም እየተዘጋጀ ነው...",

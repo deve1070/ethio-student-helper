@@ -100,7 +100,8 @@ accident:
   the backend's), `MASS_CHALLENGE_TIME`, `MASS_CHALLENGE_HEADSUP_MINUTES`, `MASS_CHALLENGE_NUDGE_MINUTES`,
   `MASS_CHALLENGE_NATURAL_TOPIC_ID`, `MASS_CHALLENGE_SOCIAL_TOPIC_ID`, optionally `CHANNEL_POSTS`,
   `CHANNEL_POST_TIME`, `CHANNEL_FEATURE_DAYS`, `CHANNEL_CHAT_ID` (channel posts; the bot must be a
-  channel admin with "Post messages"), `BOT_DATA_DIR=/data`, and
+  channel admin with "Post messages"), optionally `NUDGE_TIME` and `SUPPORT_CONTACT`,
+  `BOT_DATA_DIR=/data`, and
   `BACKEND_BASE_URL` = the backend service's public URL from step 3a (Railway's
   private-networking domain, `<service>.railway.internal`, is a worthwhile
   latency/egress optimization once the public-URL version is confirmed working
